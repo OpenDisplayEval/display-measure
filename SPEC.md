@@ -143,6 +143,56 @@ conversion, range handling and bit-depth truncation — it characterizes
 a system the show signal never traverses. Its only role is manual
 troubleshooting.
 
+## Session events §spec:session-events
+
+*Status: complete*
+
+The session core reports its lifecycle as one stream of structured
+events and narrates nowhere else. `display_measure.events` defines
+them; `display_measure.session_log` renders them as the session log,
+and color-wrangler's operator UI renders the same stream from another
+repository (`§spec:web-ui`). The log is a consumer, not a second
+reporting path.
+
+A session emits session start (mode, protocol name, patch count),
+playback, the three per-patch stages, gate outcomes, handoff (artifact
+path and hash) and session end — completed, refused, failed or
+cancelled. The stream opens with the start and closes with the end
+exactly once, whichever way the session left.
+
+**The events are this package's public API.** They are re-exported
+from `display_measure`, and the module defining them imports nothing
+but the standard library — a frontend renders a session without
+loading numpy, specio or colour, and `--help` pays for none of it.
+Each event is a frozen dataclass of plain values, so it survives
+`asdict` and a wire; none carries a live device, instrument or array.
+A consumer ignores event types it does not recognize, so adding one is
+not a breaking change.
+
+**Why the count rides the first event.** The patch protocol is fixed
+and versioned (§spec:patch-protocol), so the total is known before the
+first patch is driven and a consumer renders measured-of-total with no
+heuristic. Per-patch durations ride the completion events because
+instrument reads dominate a session's wall clock and vary by
+instrument and patch level — a constant would mislead.
+
+**Cancellation is asked between patch steps and nowhere else.** A
+session stopped mid-patch would leave a driven frame with no reading
+behind it, and the measurements artifact is immutable and complete
+(`§spec:artifact-chain`), so a partial one does not exist: the output
+is all or nothing. A cancelled session stops playback, writes no
+artifact, and ends the stream cancelled. Ctrl-C is the CLI's cancel
+source — the first interrupt raises the flag, the second aborts the
+process, because an instrument read that never returns needs an
+escape.
+
+**One gap, stated rather than hidden.** The hardware path audits the
+processor before the session opens, so the wire-format and
+output-scaling gates refuse with no event behind them: nothing has
+started to end. They reach the operator as the command's refusal until
+§road:pre-session-gate-events opens the stream early enough to carry
+them.
+
 ## Patch protocol §spec:patch-protocol
 
 *Status: complete*

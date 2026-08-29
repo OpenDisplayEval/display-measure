@@ -31,6 +31,27 @@ named as an attestation, never as a reading.
 The gates and what each refuses on are specified in §spec:session-gates;
 the session stages they sit in, in §spec:measure-sessions.
 
+## Consuming a session
+
+A session reports its whole lifecycle — start, stages, gate outcomes,
+per-patch readings and durations, handoff, outcome — as structured
+events. The session log is one consumer of that stream; an operator UI
+in another repository is another. The events are plain frozen
+dataclasses exported from `display_measure`, and importing them costs
+nothing but the standard library:
+
+```python
+from display_measure import PatchCompleted, SessionStarted
+from display_measure.session import doubles_session
+
+stream = []
+doubles_session(out, clock=clock, settle_seconds=0.5, emit=stream.append)
+```
+
+Pass `cancelled=` a predicate and the session stops between patches,
+leaving no artifact. `display-measure characterize` wires Ctrl-C to it
+(§spec:session-events).
+
 ## Where this fits
 
 | Layer | Repo | Role |
