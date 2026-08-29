@@ -33,7 +33,7 @@ ocio-display-gen generates; display-report reports. None of them
 imports a device driver.
 
 The boundary is code ownership, not process isolation. A caller runs a
-session in its own process, so the process driving the wall may also
+session in its own process, so the process driving the display may also
 serve an operator UI. What does not happen is a second implementation
 of device access — a gate cannot be bypassed by reaching for the
 device directly, because only one repository knows how.
@@ -51,7 +51,7 @@ contract, and upstream is the venue for fixes.
 
 *Status: in progress*
 
-A session is one command run with the wall powered and the instrument
+A session is one command run with the display powered and the instrument
 aimed. Modes share one core — contract audit, ambient gate, drive,
 settle, read, log — and differ only in what they drive and what they
 hand off. `characterize` drives the fixed patch protocol and emits the
@@ -71,10 +71,10 @@ once and reports; escalation to fitted or corrective LUTs is a human
 decision informed by display-report's analysis.
 
 **Instruments have doubles.** The default double is a deterministic
-plausible wall — an additive per-channel model that synthesizes the
+plausible display — an additive per-channel model that synthesizes the
 reading for the frame being driven — so the hardware-free
 characterize loop produces physically sensible numbers rather than
-noise. A colorimeter double reading the same wall through a fixed
+noise. A colorimeter double reading the same display through a fixed
 filter mismatch pairs with it, so the disciplined-hybrid derivation is
 checkable without hardware. colour-specio's random virtual
 spectrometer remains available for plumbing-only tests: its
@@ -85,7 +85,7 @@ characterization grade, a 3×3 derived in session from paired readings
 of the full-drive R/G/B anchors (four-color matrix, Ohno & Hardis
 1997; ASTM E1455) corrects the colorimeter onto the spectroradiometer.
 A three-primary additive display makes that one matrix valid for every
-mixture the wall emits. Above a luminance threshold the
+mixture the display emits. Above a luminance threshold the
 spectroradiometer's reading lands in the artifact; below it the
 disciplined colorimeter's, which is where spectroradiometer
 integration time explodes. The correction is derived per mount — it
@@ -142,6 +142,86 @@ injects downstream of input decode, bypassing receive, colour-space
 conversion, range handling and bit-depth truncation — it characterizes
 a system the show signal never traverses. Its only role is manual
 troubleshooting.
+
+## Session events §spec:session-events
+
+*Status: complete*
+
+The session core reports its lifecycle as one stream of structured
+events and narrates nowhere else. `display_measure.events` defines
+them; `display_measure.session_log` renders them as the session log,
+and color-wrangler's operator UI renders the same stream from another
+repository (`§spec:web-ui`). The log is a consumer, not a second
+reporting path.
+
+A session emits session start (mode, protocol name, patch count),
+playback, the three per-patch stages, gate outcomes, handoff (artifact
+path and hash) and session end — completed, refused, failed or
+cancelled. The stream opens with the start and closes with the end
+exactly once, whichever way the session left.
+
+**The events are this package's public API.** They are re-exported
+from `display_measure`, and the module defining them imports nothing
+but the standard library — a frontend renders a session without
+loading numpy, specio or colour, and `--help` pays for none of it.
+Each event is a frozen dataclass of plain values, so it survives
+`asdict` and a wire; none carries a live device, instrument or array.
+A consumer ignores event types it does not recognize, so adding one is
+not a breaking change.
+
+**Why the count rides the first event.** The patch protocol is fixed
+and versioned (§spec:patch-protocol), so the total is known before the
+first patch is driven and a consumer renders measured-of-total with no
+heuristic. Per-patch durations ride the completion events because
+instrument reads dominate a session's display clock and vary by
+instrument and patch level — a constant would mislead.
+
+**Cancellation is asked between patch steps and nowhere else.** A
+session stopped mid-patch would leave a driven frame with no reading
+behind it, and the measurements artifact is immutable and complete
+(`§spec:artifact-chain`), so a partial one does not exist: the output
+is all or nothing. A cancelled session stops playback, writes no
+artifact, and ends the stream cancelled. Ctrl-C is the CLI's cancel
+source — the first interrupt raises the flag, the second aborts the
+process, because an instrument read that never returns needs an
+escape.
+
+**One gap, stated rather than hidden.** The hardware path audits the
+processor before the session opens, so the wire-format and
+output-scaling gates refuse with no event behind them: nothing has
+started to end. They reach the operator as the command's refusal until
+§road:pre-session-gate-events opens the stream early enough to carry
+them.
+
+### Self-consistency §spec:self-consistency
+
+*Status: complete*
+
+A session refuses to write an artifact whose own rows contradict each
+other: a ramp whose luminance falls as its code rises, or two
+instruments that disagree by an order of magnitude where they hand
+over.
+
+**Why this one resolves late.** Every other gate refuses before the
+protocol is spent, because a refusal costing a round trip beats one
+costing a rig. A ramp is not a ramp until it is measured, so this can
+only judge at the end. What it still prevents is the artifact — and the
+artifact is what outlives the session. A measurement that contradicts
+itself never enters the chain to be promoted later by someone who was
+not in the room.
+
+**Why there is no bypass.** A flag to skip the check would be reached
+for the first time a rig misbehaved at 2 a.m., which is exactly when
+the artifact matters most. The physics-free virtual spectrometer is
+consequently refused too, and its test asserts that: reaching the gate
+is what proves the seam, and the numbers behind it were never meant to
+be believed.
+
+**Why an order of magnitude at the boundary.** Adjacent protocol codes
+step by 3/2 or 4/3, which through a ~2.3 exponent is a luminance step
+near 1.9x, so a step across the handover is expected to be large. The
+bound admits any real step and refuses the 12.8x collapse that produced
+an artifact nobody could trust.
 
 ## Patch protocol §spec:patch-protocol
 

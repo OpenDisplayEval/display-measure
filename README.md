@@ -13,14 +13,14 @@ A measurement is only worth the conditions it was taken under, and
 those conditions are easy to get wrong in ways nothing notices. A
 bench session once drove a full 72-patch protocol against a processor
 left at 66 nits after an unrelated test: peak measured 90 cd/m² on a
-wall that does 1900, and the artifact recorded a contract nobody had
+display that does 1900, and the artifact recorded a contract nobody had
 read. Twenty minutes and a rig, lost to a state one HTTP request would
 have caught.
 
 So a session refuses before it measures. It reads the processor
 read-only and compares every declared field; it checks that nothing
 but the declared luminance knob scales the output; it confirms the
-processor sees the link the session drives; it checks the wall
+processor sees the link the session drives; it checks the display
 actually does what the processor claims; and where two instruments are
 paired, it checks the correction between them is fit to extrapolate
 before spending the protocol on it.
@@ -30,6 +30,27 @@ named as an attestation, never as a reading.
 
 The gates and what each refuses on are specified in §spec:session-gates;
 the session stages they sit in, in §spec:measure-sessions.
+
+## Consuming a session
+
+A session reports its whole lifecycle — start, stages, gate outcomes,
+per-patch readings and durations, handoff, outcome — as structured
+events. The session log is one consumer of that stream; an operator UI
+in another repository is another. The events are plain frozen
+dataclasses exported from `display_measure`, and importing them costs
+nothing but the standard library:
+
+```python
+from display_measure import PatchCompleted, SessionStarted
+from display_measure.session import doubles_session
+
+stream = []
+doubles_session(out, clock=clock, settle_seconds=0.5, emit=stream.append)
+```
+
+Pass `cancelled=` a predicate and the session stops between patches,
+leaving no artifact. `display-measure characterize` wires Ctrl-C to it
+(§spec:session-events).
 
 ## Where this fits
 

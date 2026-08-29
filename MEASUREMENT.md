@@ -67,8 +67,8 @@ protocol 2 carry one name, so hybrid and spectroradiometer-only
 artifacts stay comparable.
 
 The rungs are half drive, not full: a colorimeter's ceiling sits far
-below a show wall's peak (the bench CR-120 saturates around
-400–500 cd/m² against a 1900 cd/m² wall), and an anchor neither
+below a show display's peak (the bench CR-120 saturates around
+400–500 cd/m² against a 1900 cd/m² display), and an anchor neither
 instrument can read is no anchor. An LED primary's spectrum barely
 moves with drive level, which is what filter mismatch responds to, so
 a dimmer rung samples the same emitter.
@@ -128,7 +128,7 @@ the protocol again.
 - Routing: `--threshold` sets the luminance (cd/m²) above which a
   hybrid session takes the spectroradiometer's reading, default 10.
   Black falls under it, and belongs there: blocked-aperture reads put
-  the bench CR-300's own zero at 0.0149 cd/m² against a wall black
+  the bench CR-300's own zero at 0.0149 cd/m² against a display black
   nearer 0.0014, so the reference instrument reads mostly itself down
   there while the colorimeter is both truer and 6x faster
   (`§road:instrument-floors`).

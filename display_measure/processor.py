@@ -9,7 +9,7 @@ The refusal is the point. On 2026-08-28 the bench ran a full 72-patch
 protocol against a processor left at 66 nits after an unrelated test: the
 artifact recorded a declared contract nobody checked, and the run was
 lost (§road:processor-state-snapshot). Reading the state is cheap; driving
-72 patches at the wrong one is twenty minutes and a wall.
+72 patches at the wrong one is twenty minutes and a display.
 """
 
 from __future__ import annotations
@@ -55,13 +55,13 @@ FULL_GAIN = 100
 
 # How far the measured white may sit from the declared intensity. Wide,
 # because it is a plausibility band and not a specification: the bench
-# wall measured 1.07x its 1800-nit setpoint in a healthy August run, and
+# display measured 1.07x its 1800-nit setpoint in a healthy August run, and
 # 0.58x with the panel left in Studio Mode. The band admits the first and
 # refuses the second.
 MIN_PEAK_FRACTION = 0.70
 MAX_PEAK_FRACTION = 1.30
 
-# Below this, no declaration is needed to know something is wrong: a wall
+# Below this, no declaration is needed to know something is wrong: a display
 # showing full white does not read a fraction of a nit.
 MIN_PLAUSIBLE_PEAK = 1.0
 
@@ -244,25 +244,25 @@ def _gamma_matches(declared: float | None, live: float | None) -> bool:
 
 
 def audit_output_level(measured_peak: float, declared_intensity: str) -> None:
-    """Sane-defaults plausibility on the wall's measured white.
+    """Sane-defaults plausibility on the display's measured white.
 
     The contract audit reads what the processor claims; this asks whether
-    the wall does it. The check is on the consequence, so it needs no name
+    the display does it. The check is on the consequence, so it needs no name
     for the cause — it catches Studio Mode, a moved instrument, thermal
     state, an aperture off the panel edge, and whatever else is invisible
     to the API, all through the one number they all move.
 
     That generality is the point. The 2026-08-28 bench run passed every
-    contract check and still measured 1035 cd/m² against a wall declared
+    contract check and still measured 1035 cd/m² against a display declared
     at 1800, because the panel was left in an operating mode no leaf of
     the processor's API reports (§spec:signal-contract).
 
     Two checks, both defaults rather than declarations:
 
-    - Against the declared intensity, when it states nits. A wall that
-      lands far off its own setpoint is not the wall the manifest
+    - Against the declared intensity, when it states nits. A display that
+      lands far off its own setpoint is not the display the manifest
       describes, whatever the reason.
-    - Absolute, always. A wall showing full white does not read a
+    - Absolute, always. A display showing full white does not read a
       fraction of a nit; that is no signal, a blocked aperture, or an
       instrument pointed at the room, and it is knowable with nothing to
       compare against.
@@ -272,8 +272,8 @@ def audit_output_level(measured_peak: float, declared_intensity: str) -> None:
     if measured_peak < MIN_PLAUSIBLE_PEAK:
         problems.append(
             f"white measured {measured_peak:.4g} cd/m², below the "
-            f"{MIN_PLAUSIBLE_PEAK:g} cd/m² any lit wall clears — no signal, a "
-            "blocked aperture, or an instrument that is not looking at the wall"
+            f"{MIN_PLAUSIBLE_PEAK:g} cd/m² any lit display clears — no signal, a "
+            "blocked aperture, or an instrument that is not looking at the display"
         )
 
     declared_nits = _declared_nits(declared_intensity)
@@ -284,15 +284,15 @@ def audit_output_level(measured_peak: float, declared_intensity: str) -> None:
                 f"white measured {measured_peak:.4g} cd/m² against "
                 f"{declared_nits:g} declared ({fraction:.2f}x, outside "
                 f"{MIN_PEAK_FRACTION:g}-{MAX_PEAK_FRACTION:g}x) — the "
-                "processor reports the declared intensity, so the wall is not "
+                "processor reports the declared intensity, so the display is not "
                 "doing what the processor says. Check the panel operating "
-                "mode, the instrument's aim and aperture, and the wall's "
+                "mode, the instrument's aim and aperture, and the display's "
                 "thermal state"
             )
 
     if problems:
         raise ContractViolation(
-            "the measured wall contradicts the declared contract; refusing to "
+            "the measured display contradicts the declared contract; refusing to "
             "measure:\n  - " + "\n  - ".join(problems)
         )
 
@@ -319,7 +319,7 @@ def audit_output_scaling(global_colour: dict[str, Any]) -> None:
     The contract declares one luminance figure, but the processor has
     several knobs that reach the same place: a percentage intensity gain,
     three per-channel gains, and a brightness limit that clamps the
-    setpoint. A 50% intensity gain halves the wall while `brightness`
+    setpoint. A 50% intensity gain halves the display while `brightness`
     still reads 1800, and a per-channel gain moves the white point
     without touching any value the manifest states.
 
@@ -347,7 +347,7 @@ def audit_output_scaling(global_colour: dict[str, Any]) -> None:
     ):
         problems.append(
             f"brightness-limit: {limit['value']} clamps the {brightness} "
-            "setpoint, so the wall never reaches the declared intensity"
+            "setpoint, so the display never reaches the declared intensity"
         )
 
     if problems:
