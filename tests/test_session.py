@@ -29,11 +29,11 @@ def method_calls(device: MockBMDDeckLink, method: str) -> list[dict[str, Any]]:
 
 
 def test_identical_inputs_give_identical_bytes(
-    wall_artifact: Path, fixed_clock: Clock, tmp_path: Path
+    display_artifact: Path, fixed_clock: Clock, tmp_path: Path
 ) -> None:
     second = tmp_path / "second.yaml"
     doubles_session(second, clock=fixed_clock, settle_seconds=0.0)
-    assert second.read_bytes() == wall_artifact.read_bytes()
+    assert second.read_bytes() == display_artifact.read_bytes()
 
 
 def test_the_random_instrument_is_reachable_and_its_numbers_are_refused(
@@ -57,12 +57,12 @@ def test_the_random_instrument_is_reachable_and_its_numbers_are_refused(
     assert not divergent.exists(), "a refused session writes no artifact"
 
 
-def test_artifact_measurements_route_sensibly(wall_artifact: Path) -> None:
+def test_artifact_measurements_route_sensibly(display_artifact: Path) -> None:
     """The session routes each reading to its artifact field: the
     opening black feeds both the floor and the black level, white
     carries the peak, and the primaries are mutually distinct — the
-    relations only the session (not the wall model) can prove."""
-    doc = yaml.safe_load(wall_artifact.read_text())
+    relations only the session (not the display model) can prove."""
+    doc = yaml.safe_load(display_artifact.read_text())
     luminance = doc["luminance"]
     assert doc["ambient_floor"] == luminance["black_level"]
     assert luminance["peak_luminance"] / luminance["black_level"] > 100
@@ -74,19 +74,21 @@ def test_artifact_measurements_route_sensibly(wall_artifact: Path) -> None:
 
 
 def test_patch_drive_uses_12bit_rgb_with_explicit_sdr_signaling(
-    wall_device: MockBMDDeckLink,
+    display_device: MockBMDDeckLink,
 ) -> None:
-    formats = [call["format"] for call in method_calls(wall_device, "set_pixel_format")]
+    formats = [
+        call["format"] for call in method_calls(display_device, "set_pixel_format")
+    ]
     assert formats == [PixelFormatType.FORMAT_12BIT_RGB]
-    hdr_calls = method_calls(wall_device, "set_hdr_metadata")
+    hdr_calls = method_calls(display_device, "set_hdr_metadata")
     assert len(hdr_calls) == 1
     assert EOTFType.SDR.int_value == hdr_calls[0]["metadata"].EOTF
 
 
 def test_session_drives_the_full_protocol_in_presentation_order(
-    wall_device: MockBMDDeckLink,
+    display_device: MockBMDDeckLink,
 ) -> None:
-    frames = wall_device.get_frame_history()
+    frames = display_device.get_frame_history()
     # The default doubles wiring shuffles with seed 0.
     expected = presentation_order(protocol_patches(), seed=0)
     assert len(frames) == len(expected)
@@ -96,9 +98,9 @@ def test_session_drives_the_full_protocol_in_presentation_order(
 
 
 def test_artifact_records_the_protocol_and_unshuffle_key(
-    wall_artifact: Path,
+    display_artifact: Path,
 ) -> None:
-    doc = yaml.safe_load(wall_artifact.read_text())
+    doc = yaml.safe_load(display_artifact.read_text())
     assert doc["protocol"]["name"] == PROTOCOL_NAME
     driven = [p.name for p in presentation_order(protocol_patches(), seed=0)]
     assert doc["protocol"]["presentation_order"] == driven
@@ -115,7 +117,7 @@ def test_artifact_records_the_protocol_and_unshuffle_key(
     assert len(doc["gray_response"]) == len(doc["per_channel_response"]["red"])
 
 
-def test_every_stage_is_observable_in_the_session_log(wall_log: str) -> None:
+def test_every_stage_is_observable_in_the_session_log(display_log: str) -> None:
     for marker in (
         "contract audit: PASS",
         "ambient gate: STUB",
@@ -125,14 +127,14 @@ def test_every_stage_is_observable_in_the_session_log(wall_log: str) -> None:
         "handoff:",
         "sha256",
     ):
-        assert marker in wall_log
+        assert marker in display_log
 
 
 def test_artifact_output_path_is_immutable(
-    wall_artifact: Path, fixed_clock: Clock
+    display_artifact: Path, fixed_clock: Clock
 ) -> None:
     with pytest.raises(FileExistsError):
-        doubles_session(wall_artifact, clock=fixed_clock, settle_seconds=0.0)
+        doubles_session(display_artifact, clock=fixed_clock, settle_seconds=0.0)
 
 
 def response_rows(doc: dict[str, Any]) -> dict[tuple[str, int], list[float]]:
@@ -168,18 +170,18 @@ def test_hybrid_artifact_attributes_every_row_to_an_instrument(
     # reference; black routes like any other patch once they are in.
     assert routing["sources"][:3] == ["spectroradiometer"] * 3
     assert routing["colorimeter"]["model"] == "MismatchedColorimeter"
-    assert routing["spectroradiometer"]["model"] == "PlausibleWall"
+    assert routing["spectroradiometer"]["model"] == "PlausibleDisplay"
     assert doc["instrument"]["model"] == "disciplined-hybrid"
 
 
 def test_disciplining_the_colorimeter_reproduces_the_spectro_only_session(
-    hybrid_artifact: Path, wall_artifact: Path
+    hybrid_artifact: Path, display_artifact: Path
 ) -> None:
     """The threshold covers the whole ramp, so every held-out row comes
     from the corrected colorimeter — and lands on the values the
     spectro-only session measured (§spec:sessions)."""
     hybrid = yaml.safe_load(hybrid_artifact.read_text())
-    spectro = yaml.safe_load(wall_artifact.read_text())
+    spectro = yaml.safe_load(display_artifact.read_text())
     sources = hybrid["instrument_routing"]["sources"]
     # Everything but the three derivation rungs, black now included.
     assert sources.count("colorimeter") == len(sources) - 3
@@ -198,14 +200,14 @@ def test_disciplining_the_colorimeter_reproduces_the_spectro_only_session(
         assert xyz == pytest.approx(spectro_rows[key], rel=1e-8), key
 
 
-def test_single_instrument_sessions_record_no_routing(wall_artifact: Path) -> None:
-    assert "instrument_routing" not in yaml.safe_load(wall_artifact.read_text())
+def test_single_instrument_sessions_record_no_routing(display_artifact: Path) -> None:
+    assert "instrument_routing" not in yaml.safe_load(display_artifact.read_text())
 
 
 def test_patch_seconds_cover_the_presentation_and_zero_under_fixed_clock(
-    wall_artifact: Path,
+    display_artifact: Path,
 ) -> None:
-    doc = yaml.safe_load(wall_artifact.read_text())
+    doc = yaml.safe_load(display_artifact.read_text())
     seconds = doc["protocol"]["patch_seconds"]
     assert len(seconds) == len(doc["protocol"]["presentation_order"])
     # The doubles fixture injects a fixed clock; durations measured by
@@ -229,10 +231,10 @@ def test_a_hybrid_session_reads_black_through_the_colorimeter(
 
 
 def test_a_single_instrument_session_still_opens_on_black(
-    wall_artifact: Path,
+    display_artifact: Path,
 ) -> None:
     """No derivation to pin, so the order is what protocol 1 drove."""
-    doc = yaml.safe_load(wall_artifact.read_text())
+    doc = yaml.safe_load(display_artifact.read_text())
     assert doc["protocol"]["presentation_order"][0] == "black"
 
 
@@ -243,12 +245,12 @@ def test_the_ambient_floor_is_the_black_reading_wherever_black_lands(
     assert doc["ambient_floor"] == pytest.approx(doc["luminance"]["black_level"])
 
 
-def test_a_wall_far_off_its_declared_intensity_refuses_before_the_protocol_runs(
+def test_a_display_far_off_its_declared_intensity_refuses_before_the_protocol_runs(
     fixed_clock: Clock, tmp_path: Path
 ) -> None:
     """The gate the 2026-08-28 run needed, and where it needed it.
 
-    The plausible wall peaks at 1000 cd/m²; declaring 1800 nits makes it
+    The plausible display peaks at 1000 cd/m²; declaring 1800 nits makes it
     0.56x, the same shortfall Studio Mode produced on the bench. Protocol
     3 pins white second, so this refuses two patches in rather than at
     handoff.

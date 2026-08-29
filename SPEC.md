@@ -33,7 +33,7 @@ ocio-display-gen generates; display-report reports. None of them
 imports a device driver.
 
 The boundary is code ownership, not process isolation. A caller runs a
-session in its own process, so the process driving the wall may also
+session in its own process, so the process driving the display may also
 serve an operator UI. What does not happen is a second implementation
 of device access — a gate cannot be bypassed by reaching for the
 device directly, because only one repository knows how.
@@ -51,7 +51,7 @@ contract, and upstream is the venue for fixes.
 
 *Status: in progress*
 
-A session is one command run with the wall powered and the instrument
+A session is one command run with the display powered and the instrument
 aimed. Modes share one core — contract audit, ambient gate, drive,
 settle, read, log — and differ only in what they drive and what they
 hand off. `characterize` drives the fixed patch protocol and emits the
@@ -71,10 +71,10 @@ once and reports; escalation to fitted or corrective LUTs is a human
 decision informed by display-report's analysis.
 
 **Instruments have doubles.** The default double is a deterministic
-plausible wall — an additive per-channel model that synthesizes the
+plausible display — an additive per-channel model that synthesizes the
 reading for the frame being driven — so the hardware-free
 characterize loop produces physically sensible numbers rather than
-noise. A colorimeter double reading the same wall through a fixed
+noise. A colorimeter double reading the same display through a fixed
 filter mismatch pairs with it, so the disciplined-hybrid derivation is
 checkable without hardware. colour-specio's random virtual
 spectrometer remains available for plumbing-only tests: its
@@ -85,7 +85,7 @@ characterization grade, a 3×3 derived in session from paired readings
 of the full-drive R/G/B anchors (four-color matrix, Ohno & Hardis
 1997; ASTM E1455) corrects the colorimeter onto the spectroradiometer.
 A three-primary additive display makes that one matrix valid for every
-mixture the wall emits. Above a luminance threshold the
+mixture the display emits. Above a luminance threshold the
 spectroradiometer's reading lands in the artifact; below it the
 disciplined colorimeter's, which is where spectroradiometer
 integration time explodes. The correction is derived per mount — it
@@ -173,7 +173,7 @@ not a breaking change.
 and versioned (§spec:patch-protocol), so the total is known before the
 first patch is driven and a consumer renders measured-of-total with no
 heuristic. Per-patch durations ride the completion events because
-instrument reads dominate a session's wall clock and vary by
+instrument reads dominate a session's display clock and vary by
 instrument and patch level — a constant would mislead.
 
 **Cancellation is asked between patch steps and nowhere else.** A

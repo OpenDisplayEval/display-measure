@@ -1,6 +1,6 @@
 """Disciplined-colorimeter tests (§spec:sessions).
 
-The wall double and the mismatched colorimeter differ by exactly one
+The display double and the mismatched colorimeter differ by exactly one
 3x3, so a correct derivation recovers the spectroradiometer's readings
 to float precision. That makes the arithmetic checkable without
 hardware; whether the method holds on real filters is the bench rig's
@@ -22,15 +22,15 @@ from display_measure.hybrid import (
     four_color_matrix,
 )
 from display_measure.instrument import XYZReading
-from display_measure.plausible_wall import (
+from display_measure.plausible_display import (
     FILTER_MISMATCH,
     PEAK_LUMINANCE,
     MismatchedColorimeter,
-    PlausibleWall,
+    PlausibleDisplay,
 )
 from display_measure.protocol import protocol_patches
 
-# Above every patch the wall can emit: forces the colorimeter branch.
+# Above every patch the display can emit: forces the colorimeter branch.
 ALL_COLORIMETER = 10 * PEAK_LUMINANCE
 # Below the black floor: forces the spectroradiometer branch.
 ALL_SPECTRO = 0.0
@@ -42,12 +42,12 @@ PATCH_RGB = {patch.name: patch.rgb for patch in protocol_patches()}
 
 def rig(
     device: MockBMDDeckLink, threshold: float, order: tuple[str, ...]
-) -> tuple[HybridInstrument, PlausibleWall]:
-    wall = PlausibleWall(device)
+) -> tuple[HybridInstrument, PlausibleDisplay]:
+    display = PlausibleDisplay(device)
     hybrid = HybridInstrument(
-        wall, MismatchedColorimeter(wall), luminance_threshold=threshold
+        display, MismatchedColorimeter(display), luminance_threshold=threshold
     )
-    return hybrid, wall
+    return hybrid, display
 
 
 def run(
@@ -83,11 +83,11 @@ def test_correction_recovers_the_spectroradiometer_on_held_out_patches(
     derivation set, routed to the colorimeter, land on the
     spectroradiometer's values."""
     order = (*DERIVATION_PATCHES, "white", "gray_1024", "gray_0016")
-    hybrid, wall = rig(device, ALL_COLORIMETER, order)
+    hybrid, display = rig(device, ALL_COLORIMETER, order)
     readings = run(device, hybrid, order)
     for name in ("white", "gray_1024", "gray_0016"):
         drive(device, PATCH_RGB[name])
-        assert readings[name] == pytest.approx(wall.measure().XYZ, rel=1e-9), name
+        assert readings[name] == pytest.approx(display.measure().XYZ, rel=1e-9), name
 
 
 def test_a_low_threshold_routes_every_patch_to_the_spectroradiometer(
@@ -114,7 +114,7 @@ def test_routing_attributes_every_read_and_names_both_instruments(
         SOURCE_COLORIMETER,
     ), "the derivation anchors are read by both; the rest by the colorimeter"
     assert routing.method == "four-color-matrix"
-    assert routing.spectroradiometer.model == "PlausibleWall"
+    assert routing.spectroradiometer.model == "PlausibleDisplay"
     assert routing.colorimeter.model == "MismatchedColorimeter"
     assert routing.luminance_threshold == ALL_COLORIMETER
     assert np.array(routing.correction_matrix) == pytest.approx(
@@ -153,10 +153,10 @@ def test_routing_refuses_before_the_correction_is_derived(
 
 
 def test_the_threshold_must_be_a_finite_luminance(device: MockBMDDeckLink) -> None:
-    wall = PlausibleWall(device)
+    display = PlausibleDisplay(device)
     with pytest.raises(ValueError, match="threshold"):
         HybridInstrument(
-            wall, MismatchedColorimeter(wall), luminance_threshold=float("inf")
+            display, MismatchedColorimeter(display), luminance_threshold=float("inf")
         )
 
 
@@ -172,12 +172,12 @@ class OverRangeColorimeter:
     model = "over-range"
     serial_number = "0000"
 
-    def __init__(self, wall: PlausibleWall, ceiling: float) -> None:
-        self._wall = wall
+    def __init__(self, display: PlausibleDisplay, ceiling: float) -> None:
+        self._display = display
         self._ceiling = ceiling
 
     def measure(self) -> XYZReading:
-        reading = self._wall.measure()
+        reading = self._display.measure()
         if float(reading.XYZ[1]) > self._ceiling:
             raise RuntimeError("Light intensity too high for range")
         return XYZReading(XYZ=FILTER_MISMATCH @ reading.XYZ)
@@ -186,15 +186,15 @@ class OverRangeColorimeter:
 def test_an_over_range_colorimeter_routes_to_the_spectroradiometer(
     device: MockBMDDeckLink,
 ) -> None:
-    """The bench case: the wall outruns the colorimeter's ceiling on the
+    """The bench case: the display outruns the colorimeter's ceiling on the
     bright patches, and the session completes on the reference
     instrument rather than dying at the first one."""
-    wall = PlausibleWall(device)
+    display = PlausibleDisplay(device)
     # Below full-drive white, above the derivation rungs — exactly the
-    # bind a 1900 cd/m² wall puts a CR-120 in.
+    # bind a 1900 cd/m² display puts a CR-120 in.
     hybrid = HybridInstrument(
-        wall,
-        OverRangeColorimeter(wall, ceiling=PEAK_LUMINANCE / 2),
+        display,
+        OverRangeColorimeter(display, ceiling=PEAK_LUMINANCE / 2),
         luminance_threshold=ALL_COLORIMETER,
     )
     order = (*DERIVATION_PATCHES, "white", "gray_0016")
@@ -203,7 +203,7 @@ def test_an_over_range_colorimeter_routes_to_the_spectroradiometer(
     assert sources[-2] == SOURCE_SPECTRORADIOMETER, "white is past the ceiling"
     assert sources[-1] == SOURCE_COLORIMETER, "the dark rung is not"
     drive(device, PATCH_RGB["white"])
-    assert readings["white"] == pytest.approx(wall.measure().XYZ, rel=1e-9)
+    assert readings["white"] == pytest.approx(display.measure().XYZ, rel=1e-9)
 
 
 # --- derivation gate: bail at patch 3, not patch 72 -----------------------

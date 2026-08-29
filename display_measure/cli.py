@@ -31,7 +31,7 @@ from display_measure.events import Cancelled, SessionCancelled
 
 app = typer.Typer(
     name="display-measure",
-    help="display-measure: gated instrument sessions for LED-wall characterization.",
+    help="display-measure: gated instrument sessions for display characterization.",
     no_args_is_help=True,
 )
 
@@ -64,7 +64,7 @@ class InstrumentChoice(StrEnum):
 
 @app.callback()
 def main() -> None:
-    """Measure LED walls through the show signal chain (§spec:sessions)."""
+    """Measure displays through the show signal chain (§spec:sessions)."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(message)s",
@@ -182,10 +182,10 @@ def characterize(
         ),
     ),
 ) -> None:
-    """Characterize a wall: drive the patch protocol, measure, emit the artifact.
+    """Characterize a display: drive the patch protocol, measure, emit the artifact.
 
     Ctrl-C cancels: the session stops after the patch it is on, leaves
-    the wall dark, and writes no artifact.
+    the display dark, and writes no artifact.
     """
     # Deferred so `--help` needs no measurement stack loaded.
     from display_measure import session

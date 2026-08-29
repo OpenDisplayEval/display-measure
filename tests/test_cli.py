@@ -30,7 +30,7 @@ def plain(text: str) -> str:
 
 
 # Must match conftest.FIXED_TIME: the CLI test compares its artifact
-# bytes against the wall session fixture's bytes.
+# bytes against the display session fixture's bytes.
 FIXED_TIMESTAMP = "2026-08-10T12:00:00+00:00"
 
 
@@ -54,7 +54,7 @@ def test_help_defers_the_measurement_stack() -> None:
 
 
 def test_characterize_wiring_matches_the_session_core(
-    wall_artifact: Path, tmp_path: Path
+    display_artifact: Path, tmp_path: Path
 ) -> None:
     out = tmp_path / "measurements.yaml"
     result = runner.invoke(
@@ -70,7 +70,7 @@ def test_characterize_wiring_matches_the_session_core(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert out.read_bytes() == wall_artifact.read_bytes()
+    assert out.read_bytes() == display_artifact.read_bytes()
 
 
 def test_help_lists_every_instrument_mode() -> None:
@@ -208,7 +208,7 @@ def test_an_interrupt_cancels_the_run_and_writes_no_artifact(
 
 
 def test_the_interrupt_handler_is_removed_when_the_run_ends(
-    wall_artifact: Path, tmp_path: Path
+    display_artifact: Path, tmp_path: Path
 ) -> None:
     """The CLI borrows SIGINT for the session and gives it back. Leaving
     a swallowing handler installed would make the next Ctrl-C — at a

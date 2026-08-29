@@ -173,7 +173,7 @@ class PlaybackStarted(SessionEvent):
 
 @dataclass(frozen=True)
 class PatchStarted(SessionEvent):
-    """A patch is on the wall (the drive stage). `index` is 1-based."""
+    """A patch is on the display (the drive stage). `index` is 1-based."""
 
     index: int
     patch: str
@@ -200,7 +200,7 @@ class PatchCompleted(SessionEvent):
 
     `xyz` is the reading summary in absolute cd/m² and `seconds` covers
     the whole step — drive, settle and read. Instrument reads dominate
-    a session's wall clock and vary by instrument and patch level, so a
+    a session's display clock and vary by instrument and patch level, so a
     consumer estimating remaining time has to measure the pace rather
     than assume a constant (§spec:session-events).
     """

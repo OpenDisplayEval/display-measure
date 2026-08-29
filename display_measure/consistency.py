@@ -1,7 +1,7 @@
 """Gates over the session's own output (§road:session-consistency).
 
 The contract audit establishes what the processor claims and the output
-level establishes that the wall does it. Neither catches a session that
+level establishes that the display does it. Neither catches a session that
 contradicts *itself* — a ramp that falls as drive rises, or two
 instruments that disagree where they hand over. No amount of correct
 external state prevents either.
@@ -23,13 +23,15 @@ days later, by someone reading YAML.
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 __all__ = [
     "InconsistentSession",
     "audit_ramp_monotonicity",
     "audit_routing_boundary",
 ]
 
-# Readings at or under this are the instrument's noise, not the wall's
+# Readings at or under this are the instrument's noise, not the display's
 # response, and two noise samples in either order say nothing about
 # monotonicity. The dark-room bench reads black near 0.0001 cd/m² and
 # the CR-120's own floor sits near 0.0014, so a millicandela is a
@@ -65,7 +67,7 @@ def audit_ramp_monotonicity(
     """
     problems: list[str] = []
     for name, rows in ramps.items():
-        for (low_code, low), (high_code, high) in zip(rows, rows[1:], strict=False):
+        for (low_code, low), (high_code, high) in pairwise(rows):
             if low <= floor or high <= floor:
                 continue
             if high < low:
@@ -88,7 +90,7 @@ def audit_routing_boundary(
     `ramps` maps a name to rows of (code, luminance, source) in protocol
     order. A boundary is an adjacent pair read by different instruments;
     a step there is expected — adjacent codes differ — but a step of an
-    order of magnitude is the two instruments disagreeing, not the wall
+    order of magnitude is the two instruments disagreeing, not the display
     responding.
 
     This is the check the disciplined-colorimeter design most needs. Its
@@ -98,9 +100,7 @@ def audit_routing_boundary(
     """
     problems: list[str] = []
     for name, rows in ramps.items():
-        for (low_code, low, low_src), (high_code, high, high_src) in zip(
-            rows, rows[1:], strict=False
-        ):
+        for (low_code, low, low_src), (high_code, high, high_src) in pairwise(rows):
             if low_src == high_src or low <= 0.0 or high <= 0.0:
                 continue
             ratio = max(high / low, low / high)

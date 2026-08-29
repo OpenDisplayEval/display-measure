@@ -3,11 +3,11 @@
 A spectroradiometer's integration time explodes at low light — the
 bench baseline is 18 s per patch, dominated by the dark rungs — while a
 colorimeter stays fast there and pays instead in filter mismatch,
-worst on the narrow-band primaries an LED wall emits. The four-color
+worst on the narrow-band primaries an display emits. The four-color
 matrix method (Ohno & Hardis 1997; ASTM E1455) takes both wins: derive
 a 3x3 from paired readings of one rung per primary, and a
 three-primary additive display makes that one matrix valid for every
-mixture the wall can emit.
+mixture the display can emit.
 
 Three properties make the correction trustworthy:
 
@@ -87,7 +87,7 @@ log = logging.getLogger("display_measure.session")
 METHOD = "four-color-matrix"
 
 # A filter-mismatch correction is a percent-scale error on narrow-band
-# LED emitters, so its matrix sits near identity — the wall double models
+# LED emitters, so its matrix sits near identity — the display double models
 # it at 0.97-1.06 on the diagonal and ±0.04 off it. These bounds are
 # generous against that: they exist to catch a derivation that is not
 # filter mismatch at all, not to police a real instrument pair.
@@ -110,17 +110,17 @@ MAX_RAW_DISAGREEMENT = 4.0
 # each a pure sample of that emitter.
 #
 # Half-drive rungs, not the full-drive anchors. A colorimeter's ceiling
-# is far below a show wall's peak — the CR-120 on the bench rig
-# saturates around 400-500 cd/m² against a 1900 cd/m² wall, so
+# is far below a show display's peak — the CR-120 on the bench rig
+# saturates around 400-500 cd/m² against a 1900 cd/m² display, so
 # full-drive red and green cannot be read at all, and a derivation that
 # cannot be measured is no derivation. An LED primary's spectrum barely
 # moves with drive level, which is what filter mismatch responds to, so
 # a dimmer rung samples the same emitter and both instruments stay in
-# range. Override for a wall whose full drive the colorimeter can take.
+# range. Override for a display whose full drive the colorimeter can take.
 DERIVATION_PATCHES = ("red_2048", "green_2048", "blue_2048")
 
 # Patches measuring at or above this luminance (cd/m²) go to the
-# spectroradiometer. 1% of a 1000 cd/m² wall's peak — above it the
+# spectroradiometer. 1% of a 1000 cd/m² display's peak — above it the
 # spectroradiometer integrates quickly, below it the exposure is what
 # makes a session take twenty minutes.
 DEFAULT_LUMINANCE_THRESHOLD = 10.0
@@ -343,10 +343,10 @@ class HybridInstrument:
     def _probe(self) -> npt.NDArray[np.float64] | None:
         """The colorimeter's reading, or None when it cannot take the patch.
 
-        A colorimeter's ceiling sits below a show wall's peak, and it
+        A colorimeter's ceiling sits below a show display's peak, and it
         refuses an over-range patch rather than returning a saturated
         number — the CR-120 raises on anything past roughly 450 cd/m²
-        against a 1900 cd/m² wall. That refusal is the routing signal it
+        against a 1900 cd/m² display. That refusal is the routing signal it
         sounds like: too bright for this instrument, so the
         spectroradiometer takes it, which is where a patch that bright
         was always going. Any other failure routes the same way and says

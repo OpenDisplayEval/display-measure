@@ -12,7 +12,7 @@ The session core arrives here from color-wrangler and takes over as
 the one tool that touches instruments and signal hardware
 (`§spec:session-ownership`). The scaffold lands first, the hardware
 path follows, and only then does the old path retire — so no window
-exists in which neither repository can measure a wall.
+exists in which neither repository can measure a display.
 
 ### Move the bench path §road:move-bench-path
 

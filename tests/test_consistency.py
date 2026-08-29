@@ -59,7 +59,7 @@ class TestMonotonicity:
 
     def test_readings_at_the_floor_do_not_trip_it(self) -> None:
         """Two rungs under the instrument's floor read as noise, and noise
-        is not evidence the wall got darker. The gate is for real
+        is not evidence the display got darker. The gate is for real
         inversions, not for the dark end being hard to measure."""
         noisy = [(16, 0.00012), (24, 0.00009), (32, 0.00014), *GOOD[3:]]
         audit_ramp_monotonicity({"gray": noisy}, floor=0.001)

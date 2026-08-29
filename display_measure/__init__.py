@@ -1,4 +1,4 @@
-"""Gated instrument sessions for LED-wall characterization (§spec:sessions).
+"""Gated instrument sessions for display characterization (§spec:sessions).
 
 The session event stream is re-exported here because it is the package's
 public contract: a consumer — color-wrangler's operator UI, an RPC

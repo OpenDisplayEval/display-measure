@@ -87,7 +87,7 @@ from display_measure.instrument import (
     luminance,
     xyz,
 )
-from display_measure.plausible_wall import MismatchedColorimeter, PlausibleWall
+from display_measure.plausible_display import MismatchedColorimeter, PlausibleDisplay
 from display_measure.processor import (
     ContractViolation,
     TesseraProcessor,
@@ -185,7 +185,7 @@ def _gate(
     """Report a refusal as the gate's own outcome before it propagates.
 
     A session-end event carries the message but not the check that
-    produced it, and "the wall measures 0.56x its declared intensity"
+    produced it, and "the display measures 0.56x its declared intensity"
     calls for a different trip than "the processor has overdrive on".
     Naming the gate is what lets a consumer show the operator where to
     go (§spec:web-ui).
@@ -247,7 +247,7 @@ def _setup_drive(device: PatchDrive, emit: EventSink) -> None:
     """Declare pixel format and EOTF signaling, then start playback.
 
     bmd-signal-gen defaults to PQ InfoFrames, which would fault an
-    SDR-contract wall, so the session signals explicitly
+    SDR-contract display, so the session signals explicitly
     (§spec:sessions).
     """
     device.pixel_format = PATCH_PIXEL_FORMAT
@@ -448,7 +448,7 @@ def _characterize(
         )
     finally:
         # Playback stops however the session leaves the loop — handed
-        # off, refused, failed or cancelled. A wall left holding the
+        # off, refused, failed or cancelled. A display left holding the
         # last patch after a session ends is a rig in an unknown state,
         # and cancellation in particular promises the drive stops
         # (§spec:session-events).
@@ -576,7 +576,7 @@ def _drive_presentation(
     for index, patch in enumerate(presented, start=1):
         if cancelled():
             # Between steps and nowhere else. A patch stopped mid-step
-            # leaves a frame on the wall with no reading behind it, and
+            # leaves a frame on the display with no reading behind it, and
             # the artifact is all-or-nothing (§spec:artifact-chain), so
             # there is nothing to salvage by stopping sooner.
             raise SessionCancelled(
@@ -614,7 +614,7 @@ def _drive_presentation(
         elif patch.name == WHITE_PATCH:
             # Gated where white is read, which protocol 3 pins second:
             # the contract audit established what the processor claims,
-            # and this is where the wall either does it or does not.
+            # and this is where the display either does it or does not.
             peak = luminance(measurement)
             with _gate(emit, Gate.OUTPUT_LEVEL):
                 audit_output_level(peak, declared_intensity)
@@ -661,12 +661,12 @@ def doubles_session(
 ) -> MockBMDDeckLink:
     """Run one characterize session against the device doubles.
 
-    The default instrument is the plausible wall (rationale and model in
-    :mod:`display_measure.plausible_wall`). Passing `seed` selects
+    The default instrument is the plausible display (rationale and model in
+    :mod:`display_measure.plausible_display`). Passing `seed` selects
     colour-specio's random virtual spectrometer instead, seeded through
     numpy's global RNG — plumbing-only readings — and also keys the
     presentation shuffle (the default shuffles with seed 0). `hybrid`
-    pairs the wall with the mismatched colorimeter double, exercising
+    pairs the display with the mismatched colorimeter double, exercising
     the disciplined-colorimeter path without hardware. Returns the
     closed mock device; its recorded history lets tests observe the
     drive without duplicating this wiring.
@@ -679,21 +679,21 @@ def doubles_session(
         device._max_frame_history = len(protocol_patches())
         instrument: Instrument
         if hybrid:
-            wall = PlausibleWall(device)
+            display = PlausibleDisplay(device)
             instrument = HybridInstrument(
-                wall,
-                MismatchedColorimeter(wall),
+                display,
+                MismatchedColorimeter(display),
                 luminance_threshold=luminance_threshold,
             )
         elif seed is not None:
             # Deferred: specio drags colour + scipy (~0.8 s) that the
-            # default wall path never needs.
+            # default display path never needs.
             from specio.spectrometers import VirtualSpectrometer
 
             np.random.seed(seed)
             instrument = VirtualSpectrometer()
         else:
-            instrument = PlausibleWall(device)
+            instrument = PlausibleDisplay(device)
         characterize(
             device=device,
             instrument=instrument,

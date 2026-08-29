@@ -31,7 +31,7 @@ from display_measure.events import (
 )
 from display_measure.hybrid import DerivationRefused, HybridInstrument
 from display_measure.instrument import XYZReading
-from display_measure.plausible_wall import PlausibleWall
+from display_measure.plausible_display import PlausibleDisplay
 from display_measure.processor import ContractViolation
 from display_measure.protocol import PROTOCOL_NAME, protocol_patches
 from display_measure.session import (
@@ -54,12 +54,12 @@ def of_type[T: SessionEvent](
 
 
 def test_the_stream_opens_with_the_session_and_its_patch_count(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
     """The count rides the first event, so a consumer renders
     measured-of-total from the start rather than guessing
     (§spec:session-events)."""
-    started = wall_stream[0]
+    started = display_stream[0]
     assert isinstance(started, SessionStarted)
     assert started.mode == SessionMode.CHARACTERIZE
     assert started.protocol_name == PROTOCOL_NAME
@@ -67,20 +67,20 @@ def test_the_stream_opens_with_the_session_and_its_patch_count(
 
 
 def test_the_stream_closes_exactly_once_with_the_outcome(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
-    ended = of_type(wall_stream, SessionEnded)
+    ended = of_type(display_stream, SessionEnded)
     assert len(ended) == 1
-    assert ended[0] is wall_stream[-1]
+    assert ended[0] is display_stream[-1]
     assert ended[0].outcome == Outcome.COMPLETED
     assert ended[0].detail == ""
 
 
 def test_every_patch_reports_its_completion_with_a_reading_and_a_duration(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
-    started = of_type(wall_stream, SessionStarted)[0]
-    completed = of_type(wall_stream, PatchCompleted)
+    started = of_type(display_stream, SessionStarted)[0]
+    completed = of_type(display_stream, PatchCompleted)
     assert len(completed) == started.patch_count
     assert [event.index for event in completed] == list(
         range(1, started.patch_count + 1)
@@ -97,13 +97,13 @@ def test_every_patch_reports_its_completion_with_a_reading_and_a_duration(
 
 
 def test_each_patch_walks_drive_then_settle_then_read(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
     """The three per-patch stages §spec:sessions names, in order and
     announced before the session sits still for them."""
     steps = [
         event
-        for event in wall_stream
+        for event in display_stream
         if isinstance(event, PatchStarted | PatchSettling | PatchCompleted)
     ]
     assert len(steps) == 3 * len(protocol_patches())
@@ -116,22 +116,22 @@ def test_each_patch_walks_drive_then_settle_then_read(
 
 
 def test_playback_declares_the_wire_format_before_the_first_patch(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
-    playback = of_type(wall_stream, PlaybackStarted)
+    playback = of_type(display_stream, PlaybackStarted)
     assert len(playback) == 1
     assert playback[0].pixel_format == "FORMAT_12BIT_RGB"
     assert playback[0].eotf == "SDR"
-    assert wall_stream.index(playback[0]) < wall_stream.index(
-        of_type(wall_stream, PatchStarted)[0]
+    assert display_stream.index(playback[0]) < display_stream.index(
+        of_type(display_stream, PatchStarted)[0]
     )
 
 
 def test_every_gate_the_session_holds_reports_an_outcome(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
     verdicts = {
-        event.gate: event.verdict for event in of_type(wall_stream, GateEvaluated)
+        event.gate: event.verdict for event in of_type(display_stream, GateEvaluated)
     }
     assert verdicts == {
         Gate.CONTRACT_AUDIT: GateVerdict.PASS,
@@ -144,13 +144,13 @@ def test_every_gate_the_session_holds_reports_an_outcome(
 
 
 def test_the_ambient_gate_reports_a_stub_rather_than_a_pass(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
     """Rendering an unrun check as a pass would claim a gate nobody
     held (§road:session-gates)."""
     ambient = next(
         event
-        for event in of_type(wall_stream, GateEvaluated)
+        for event in of_type(display_stream, GateEvaluated)
         if event.gate == Gate.AMBIENT
     )
     assert ambient.verdict == GateVerdict.STUB
@@ -158,9 +158,9 @@ def test_the_ambient_gate_reports_a_stub_rather_than_a_pass(
 
 
 def test_handoff_carries_the_artifact_path_and_its_real_hash(
-    wall_events: tuple[tuple[SessionEvent, ...], Path],
+    display_events: tuple[tuple[SessionEvent, ...], Path],
 ) -> None:
-    stream, out = wall_events
+    stream, out = display_events
     handoff = of_type(stream, HandoffCompleted)
     assert len(handoff) == 1
     assert handoff[0].path == str(out)
@@ -197,7 +197,7 @@ def test_a_refusal_names_the_gate_and_ends_the_session(
 
 
 def test_every_event_renders_to_plain_data(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
     """The stream crosses a repository boundary and will cross a wire.
 
@@ -206,7 +206,7 @@ def test_every_event_renders_to_plain_data(
     a device, an instrument, a numpy array — would not survive either
     trip (§spec:session-events).
     """
-    for event in wall_stream:
+    for event in display_stream:
         assert is_dataclass(event)
         for name, value in asdict(event).items():
             values = value if isinstance(value, tuple) else (value,)
@@ -247,9 +247,9 @@ def render(stream: tuple[SessionEvent, ...]) -> str:
 
 
 def test_the_session_log_is_the_event_stream_rendered(
-    wall_log: str,
-    wall_events: tuple[tuple[SessionEvent, ...], Path],
-    wall_artifact: Path,
+    display_log: str,
+    display_events: tuple[tuple[SessionEvent, ...], Path],
+    display_artifact: Path,
 ) -> None:
     """§road:cli-log-from-events: not a parallel path.
 
@@ -259,17 +259,17 @@ def test_the_session_log_is_the_event_stream_rendered(
     exactly. Only the artifact path differs, because the two runs write
     to different directories.
     """
-    stream, out = wall_events
+    stream, out = display_events
     replayed = render(stream).replace(str(out), "<artifact>")
-    assert replayed == wall_log.replace(str(wall_artifact), "<artifact>")
+    assert replayed == display_log.replace(str(display_artifact), "<artifact>")
 
 
 def test_the_log_still_narrates_every_stage(
-    wall_stream: tuple[SessionEvent, ...],
+    display_stream: tuple[SessionEvent, ...],
 ) -> None:
     """The stages §spec:sessions names, still in the log now that the
     log renders events rather than writing its own lines."""
-    rendered = render(wall_stream)
+    rendered = render(display_stream)
     for marker in (
         "session: characterize",
         "contract audit: PASS",
@@ -305,7 +305,7 @@ class UnfitColorimeter:
 
     The shipped `MismatchedColorimeter` is fit by construction, so the
     derivation-fitness gate never fires against it. This one reads the
-    same wall through a gross per-channel skew, which is what an
+    same display through a gross per-channel skew, which is what an
     instrument fault looks like from the session's side.
     """
 
@@ -313,12 +313,12 @@ class UnfitColorimeter:
     model = "UnfitColorimeter"
     serial_number = "unfit-1"
 
-    def __init__(self, wall: PlausibleWall) -> None:
-        self._wall = wall
+    def __init__(self, display: PlausibleDisplay) -> None:
+        self._display = display
 
     def measure(self) -> XYZReading:
         skew = np.array([2.5, 0.4, 3.0])
-        return XYZReading(XYZ=skew * self._wall.measure().XYZ)
+        return XYZReading(XYZ=skew * self._display.measure().XYZ)
 
 
 def test_an_unfit_correction_refuses_under_its_own_gate(
@@ -331,10 +331,10 @@ def test_an_unfit_correction_refuses_under_its_own_gate(
     stream: list[SessionEvent] = []
     with MockBMDDeckLink(0) as device, pytest.raises(DerivationRefused):
         device._max_frame_history = len(protocol_patches())
-        wall = PlausibleWall(device)
+        display = PlausibleDisplay(device)
         characterize(
             device=device,
-            instrument=HybridInstrument(wall, UnfitColorimeter(wall)),
+            instrument=HybridInstrument(display, UnfitColorimeter(display)),
             out_path=out,
             clock=fixed_clock,
             settle_seconds=0.0,

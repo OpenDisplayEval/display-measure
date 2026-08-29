@@ -14,7 +14,7 @@ from display_measure.events import (
     SessionEnded,
     SessionEvent,
 )
-from display_measure.plausible_wall import PlausibleWall
+from display_measure.plausible_display import PlausibleDisplay
 from display_measure.protocol import protocol_patches
 from display_measure.session import (
     Clock,
@@ -27,7 +27,7 @@ from display_measure.session import (
 class CancelAfter:
     """A cancel source that answers true once `count` patches are in.
 
-    Counts `PatchCompleted` rather than a wall clock, so the test says
+    Counts `PatchCompleted` rather than a display clock, so the test says
     exactly where the operator pressed the button and does not race the
     session it is cancelling.
     """
@@ -76,7 +76,7 @@ def test_a_cancelled_session_writes_no_artifact(
 def test_cancellation_lands_between_patches_not_inside_one(
     fixed_clock: Clock, tmp_path: Path
 ) -> None:
-    """Stopping mid-patch would leave a frame on the wall with no
+    """Stopping mid-patch would leave a frame on the display with no
     reading behind it, and there is nothing to salvage by doing so."""
     cancel = run_cancelled(tmp_path / "cancelled.yaml", fixed_clock, after=3)
     driven = [e for e in cancel.stream if isinstance(e, PatchStarted)]
@@ -104,7 +104,7 @@ def test_cancelling_before_the_first_patch_drives_nothing(
 
 
 def test_cancellation_stops_playback(fixed_clock: Clock, tmp_path: Path) -> None:
-    """The wall goes back to nothing. A rig left holding the last patch
+    """The display goes back to nothing. A rig left holding the last patch
     after the session ended is a rig in an unknown state."""
     device = MockBMDDeckLink(0)
     cancel = CancelAfter(2)
@@ -112,7 +112,7 @@ def test_cancellation_stops_playback(fixed_clock: Clock, tmp_path: Path) -> None
         device._max_frame_history = len(protocol_patches())
         characterize(
             device=device,
-            instrument=PlausibleWall(device),
+            instrument=PlausibleDisplay(device),
             out_path=tmp_path / "cancelled.yaml",
             clock=fixed_clock,
             settle_seconds=0.0,

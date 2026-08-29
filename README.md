@@ -13,14 +13,14 @@ A measurement is only worth the conditions it was taken under, and
 those conditions are easy to get wrong in ways nothing notices. A
 bench session once drove a full 72-patch protocol against a processor
 left at 66 nits after an unrelated test: peak measured 90 cd/m² on a
-wall that does 1900, and the artifact recorded a contract nobody had
+display that does 1900, and the artifact recorded a contract nobody had
 read. Twenty minutes and a rig, lost to a state one HTTP request would
 have caught.
 
 So a session refuses before it measures. It reads the processor
 read-only and compares every declared field; it checks that nothing
 but the declared luminance knob scales the output; it confirms the
-processor sees the link the session drives; it checks the wall
+processor sees the link the session drives; it checks the display
 actually does what the processor claims; and where two instruments are
 paired, it checks the correction between them is fit to extrapolate
 before spending the protocol on it.
