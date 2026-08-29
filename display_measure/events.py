@@ -24,8 +24,8 @@ are added by subclassing `SessionEvent`; that is not a breaking change,
 and a consumer written against today's set keeps working.
 
 Ordering is fixed. `SessionStarted` is first and `SessionEnded` is
-last, exactly once each, on every path — completed, refused or
-failed. One exception, named here so no consumer discovers it the
+last, exactly once each, on every path — completed, refused, failed or
+cancelled. One exception, named here so no consumer discovers it the
 hard way: the hardware path audits the processor *before* the session
 opens (`display_measure.session.hardware_session`), so a refusal there
 raises without any event at all. Nothing has started to end.
@@ -37,6 +37,7 @@ from datetime import datetime
 from enum import StrEnum
 
 __all__ = [
+    "Cancelled",
     "EventSink",
     "Gate",
     "GateEvaluated",
@@ -47,6 +48,7 @@ __all__ = [
     "PatchSettling",
     "PatchStarted",
     "PlaybackStarted",
+    "SessionCancelled",
     "SessionEnded",
     "SessionEvent",
     "SessionMode",
@@ -107,6 +109,7 @@ class Outcome(StrEnum):
     COMPLETED = "completed"
     REFUSED = "refused"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True)
@@ -224,7 +227,24 @@ class SessionEnded(SessionEvent):
     detail: str = ""
 
 
+class SessionCancelled(Exception):
+    """Raised when a session stops on the caller's cancellation request.
+
+    An exception rather than a return value: it unwinds past the
+    handoff, which is the guarantee that matters. A measurements
+    artifact is immutable and complete (§spec:artifact-chain), so a
+    partial one does not exist — a cancelled session's output is
+    nothing at all.
+    """
+
+
 # What a session emits into. Synchronous and in-order: a consumer that
 # wants a queue owns the queue, because the core has no opinion about
 # how a frontend schedules itself. A sink that raises fails the session.
 EventSink = Callable[[SessionEvent], None]
+
+# Asked between patch steps, never mid-patch (§spec:session-events).
+# A predicate rather than an object so a caller can hand over a
+# `threading.Event.is_set`, a signal flag, or an async cancel scope's
+# state without this package naming a concurrency primitive.
+Cancelled = Callable[[], bool]

@@ -12,6 +12,7 @@ not when a frontend imports the events it renders, and not for
 """
 
 from display_measure.events import (
+    Cancelled,
     EventSink,
     Gate,
     GateEvaluated,
@@ -22,6 +23,7 @@ from display_measure.events import (
     PatchSettling,
     PatchStarted,
     PlaybackStarted,
+    SessionCancelled,
     SessionEnded,
     SessionEvent,
     SessionMode,
@@ -29,6 +31,7 @@ from display_measure.events import (
 )
 
 __all__ = [
+    "Cancelled",
     "EventSink",
     "Gate",
     "GateEvaluated",
@@ -39,6 +42,7 @@ __all__ = [
     "PatchSettling",
     "PatchStarted",
     "PlaybackStarted",
+    "SessionCancelled",
     "SessionEnded",
     "SessionEvent",
     "SessionMode",

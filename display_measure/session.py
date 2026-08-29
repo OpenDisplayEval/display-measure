@@ -17,6 +17,11 @@ color-wrangler is another, so nothing here knows what a frontend
 looks like. `emit` defaults to the log renderer, which keeps a library
 caller and the CLI on the same path rather than privileging either.
 
+Cancellation is asked between patch steps and nowhere else. Stopping
+mid-patch would leave a driven frame with no reading, and the artifact
+is all-or-nothing (§spec:artifact-chain) — so a cancelled session
+stops playback, writes nothing, and raises `SessionCancelled`.
+
 Determinism: see the determinism-seam design in
 `display_measure.artifact`'s module docstring.
 """
@@ -51,6 +56,7 @@ from display_measure.artifact import (
     write,
 )
 from display_measure.events import (
+    Cancelled,
     EventSink,
     Gate,
     GateEvaluated,
@@ -61,6 +67,7 @@ from display_measure.events import (
     PatchSettling,
     PatchStarted,
     PlaybackStarted,
+    SessionCancelled,
     SessionEnded,
     SessionMode,
     SessionStarted,
@@ -163,6 +170,11 @@ def _frame(rgb: tuple[int, int, int]) -> npt.NDArray[np.uint16]:
     return np.full((FRAME_HEIGHT, FRAME_WIDTH, 3), rgb, dtype=np.uint16)
 
 
+def never_cancelled() -> bool:
+    """The default cancel source: a session with none runs to handoff."""
+    return False
+
+
 @contextmanager
 def _gate(emit: EventSink, gate: Gate) -> Iterator[None]:
     """Report a refusal as the gate's own outcome before it propagates.
@@ -189,11 +201,15 @@ def _session_outcome(emit: EventSink, clock: Clock) -> Iterator[None]:
     refusing, an instrument raising, an operator cancelling — are
     exactly the ones nobody remembers to instrument by hand.
 
-    The failure outcomes are distinguished because the operator's next
-    move differs: refused sends them to the rig, failed to a bug report.
+    The three failure outcomes are distinguished because the operator's
+    next move differs: cancelled is what they asked for, refused sends
+    them to the rig, and failed sends them to a bug report.
     """
     try:
         yield
+    except SessionCancelled as e:
+        emit(SessionEnded(Outcome.CANCELLED, clock(), str(e)))
+        raise
     except (ContractViolation, DerivationRefused) as e:
         emit(SessionEnded(Outcome.REFUSED, clock(), str(e)))
         raise
@@ -301,6 +317,7 @@ def characterize(
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
     reading: ProcessorStateSnapshot | None = None,
     emit: EventSink = log_events,
+    cancelled: Cancelled = never_cancelled,
 ) -> None:
     """Run one characterize session and write the measurements artifact.
 
@@ -316,7 +333,9 @@ def characterize(
     either way.
 
     Reports its whole lifecycle to `emit` (§spec:session-events),
-    which defaults to the session log.
+    which defaults to the session log. `cancelled` is asked between
+    patch steps: when it answers true the session stops playback,
+    writes no artifact, and raises `SessionCancelled`.
     """
     session_start = clock()
     emit(
@@ -338,6 +357,7 @@ def characterize(
             declared=declared,
             reading=reading,
             emit=emit,
+            cancelled=cancelled,
             session_start=session_start,
         )
 
@@ -353,6 +373,7 @@ def _characterize(
     declared: ProcessorStateSnapshot,
     reading: ProcessorStateSnapshot | None,
     emit: EventSink,
+    cancelled: Cancelled,
     session_start: datetime,
 ) -> None:
     """The session body `characterize` brackets with start and end events."""
@@ -411,11 +432,14 @@ def _characterize(
             settle_seconds=settle_seconds,
             declared_intensity=declared.intensity,
             emit=emit,
+            cancelled=cancelled,
         )
     finally:
         # Playback stops however the session leaves the loop — handed
-        # off, refused or failed. A wall left holding the last patch
-        # after a session ends is a rig in an unknown state.
+        # off, refused, failed or cancelled. A wall left holding the
+        # last patch after a session ends is a rig in an unknown state,
+        # and cancellation in particular promises the drive stops
+        # (§spec:session-events).
         device.stop_playback()
 
     session_end = clock()
@@ -461,6 +485,7 @@ def _drive_presentation(
     settle_seconds: float,
     declared_intensity: str,
     emit: EventSink,
+    cancelled: Cancelled,
 ) -> tuple[dict[str, InstrumentReading], tuple[float, ...], float]:
     """Drive every patch; return the readings, their durations, and the floor.
 
@@ -473,6 +498,15 @@ def _drive_presentation(
     ambient_floor: float | None = None
 
     for index, patch in enumerate(presented, start=1):
+        if cancelled():
+            # Between steps and nowhere else. A patch stopped mid-step
+            # leaves a frame on the wall with no reading behind it, and
+            # the artifact is all-or-nothing (§spec:artifact-chain), so
+            # there is nothing to salvage by stopping sooner.
+            raise SessionCancelled(
+                f"cancelled after {index - 1} of {len(presented)} patches; "
+                "no artifact written"
+            )
         began = clock()
         _drive(device, patch, index, emit)
         _settle(settle_seconds, index, emit)
@@ -541,6 +575,7 @@ def doubles_session(
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
     emit: EventSink = log_events,
+    cancelled: Cancelled = never_cancelled,
 ) -> MockBMDDeckLink:
     """Run one characterize session against the device doubles.
 
@@ -587,6 +622,7 @@ def doubles_session(
             declared=declared,
             reading=normalized_reading(declared),
             emit=emit,
+            cancelled=cancelled,
         )
     return device
 
@@ -620,6 +656,7 @@ def hardware_session(
     processor_host: str | None = None,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
     emit: EventSink = log_events,
+    cancelled: Cancelled = never_cancelled,
 ) -> None:
     """Run one characterize session against the bench instruments.
 
@@ -663,4 +700,5 @@ def hardware_session(
             declared=declared,
             reading=reading,
             emit=emit,
+            cancelled=cancelled,
         )
