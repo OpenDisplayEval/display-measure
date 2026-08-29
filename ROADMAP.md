@@ -17,7 +17,7 @@ exists in which neither repository can measure a wall.
 ### Move the bench path §road:move-bench-path
 
 Carry the hardware session and its gates across, and re-run a full
-bench characterize from display-measure. §spec:sessions,
+bench characterize from display-measure. §spec:measure-sessions,
 §spec:session-gates. Upstream: `§road:move-bench-path`.
 
 **Verify:** on the bench, `display-measure characterize --processor

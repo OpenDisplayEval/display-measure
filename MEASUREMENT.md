@@ -124,7 +124,7 @@ the protocol again.
   characterization-grade sessions; a bare colorimeter is drift-check
   grade only. A hybrid session keeps characterization grade while
   spending the colorimeter's speed on the dark patches, correcting it
-  in session against the CR-300 (§spec:sessions).
+  in session against the CR-300 (§spec:measure-sessions).
 - Routing: `--threshold` sets the luminance (cd/m²) above which a
   hybrid session takes the spectroradiometer's reading, default 10.
   Black falls under it, and belongs there: blocked-aperture reads put

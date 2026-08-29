@@ -29,7 +29,7 @@ What no API reports, the operator attests and the artifact records —
 named as an attestation, never as a reading.
 
 The gates and what each refuses on are specified in §spec:session-gates;
-the session stages they sit in, in §spec:sessions.
+the session stages they sit in, in §spec:measure-sessions.
 
 ## Where this fits
 

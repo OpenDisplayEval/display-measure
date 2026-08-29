@@ -13,6 +13,14 @@ backticks — `§spec:session-ownership`, `§spec:signal-contract`,
 this one; so does any slug carried in this repository's source that no
 heading here defines. This document covers only what this layer owns.
 
+Where a heading here would otherwise collide with an upstream one, it
+takes a distinct slug. Upstream owns `§spec:sessions` and says more
+about a session than this layer needs to, so the local section is
+§spec:measure-sessions. The ported source's own `§spec:sessions`
+citations were written against upstream's section and still resolve
+there, which is what they meant. Two documents owning one anchor with
+drifting content is not reuse.
+
 ## Scope §spec:scope
 
 *Status: in progress*
@@ -39,7 +47,7 @@ owns instrument communication. colour-specio is pinned to a PyPI
 release and never forked; its `measure()` surface is the driver
 contract, and upstream is the venue for fixes.
 
-## Measurement sessions §spec:sessions
+## Measurement sessions §spec:measure-sessions
 
 *Status: in progress*
 
