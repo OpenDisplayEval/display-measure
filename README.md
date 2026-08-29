@@ -28,6 +28,9 @@ before spending the protocol on it.
 What no API reports, the operator attests and the artifact records —
 named as an attestation, never as a reading.
 
+The gates and what each refuses on are specified in §spec:session-gates;
+the session stages they sit in, in §spec:measure-sessions.
+
 ## Where this fits
 
 | Layer | Repo | Role |
@@ -38,6 +41,8 @@ named as an attestation, never as a reading.
 | Validate | [display-report](https://github.com/OpenDisplayEval/display-report) | Independent analysis and reports from a measurement file |
 
 Every seam is a file, and every file records the sha256 of its inputs.
+This layer owns the measurement file and nothing downstream of it
+(§spec:scope, §spec:measurements-artifact).
 
 System requirements, architecture and the cross-component roadmap live
 in color-wrangler, which this repository references as upstream

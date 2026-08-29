@@ -1,0 +1,134 @@
+[project]
+name = "display-measure"
+# Version derives from git tags (hatch-vcs); flywheel cuts the tags.
+dynamic = ["version"]
+description = "Gated instrument sessions for display characterization and verification"
+authors = [
+    { name = "Ritchie Argue", email = "4462072+repentsinner@users.noreply.github.com" },
+]
+readme = "README.md"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+# Floor 3.13 per the roadmap; ceiling <3.14 inherited from
+# colour-specio 0.4.2a0 (its requires-python is >=3.13,<3.14).
+requires-python = ">=3.13,<3.14"
+keywords = [
+    "led-wall",
+    "color-management",
+    "characterization",
+    "opencolorio",
+    "measurement",
+    "spectroradiometer",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+dependencies = [
+    # Patch drive: DeckLink output surface plus its hardware-free mock
+    # (§spec:sessions). Git tag pin — bmd-signal-generator is not on
+    # PyPI.
+    "bmd-signal-generator",
+    # Instrument read (§spec:sessions). The 0.4.2a0 pre-release is
+    # the first PyPI release compatible with bmd-signal-generator's
+    # numpy>=2.3.1 floor (0.4.1.post0 pins numpy<2). Pinned exactly:
+    # colour-specio's measure() surface is the driver contract.
+    "colour-specio==0.4.2a0",
+    "numpy>=2.3.1",
+    # The contract audit reads the show manifest's signal_contract
+    # (§spec:session-gates). The artifact writer still emits YAML by hand.
+    "pyyaml>=6.0.1",
+    "typer>=0.16,<0.17",
+]
+
+[project.urls]
+Homepage = "https://github.com/OpenDisplayEval/display-measure"
+Repository = "https://github.com/OpenDisplayEval/display-measure.git"
+Issues = "https://github.com/OpenDisplayEval/display-measure/issues"
+Changelog = "https://github.com/OpenDisplayEval/display-measure/blob/main/CHANGELOG.md"
+
+[project.scripts]
+display-measure = "display_measure.cli:app"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["display_measure"]
+
+[tool.uv.sources]
+bmd-signal-generator = { git = "https://github.com/OpenLEDEval/bmd-signal-gen", tag = "v0.2.1" }
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.4.1",
+    "pyyaml>=6.0.1",
+    "ruff>=0.12.3",
+    "types-pyyaml>=6.0.1",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "C90", # mccabe complexity
+    "T20", # flake8-print
+    "SIM", # flake8-simplify
+    "TC",  # flake8-type-checking
+    "RUF", # Ruff-specific rules
+    # Blanket `# type: ignore` can silence version-compatibility errors
+    # (fleet precedent: display-patterns).
+    "PGH003", # blanket-type-ignore
+]
+ignore = [
+    "E501", # Line too long (handled by formatter)
+    "B008", # Do not perform function calls in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG", "T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["display_measure"]
+split-on-trailing-comma = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.13"
+files = ["display_measure", "tests"]
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# colour-specio ships no py.typed marker; its surface is narrow here
+# (VirtualSpectrometer, SpecRadiometer, SPDMeasurement).
+module = ["specio.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
