@@ -91,7 +91,7 @@ def test_any_enabled_processing_feature_refuses(feature: str) -> None:
 
 
 def test_violations_are_reported_together() -> None:
-    """One refusal names every divergence — not one trip to the wall each."""
+    """One refusal names every divergence — not one trip to the display each."""
     live = state_from_tessera(
         tree(brightness=66, gamma=2.4, **{"dark-magic": {"enabled": True}})
     )
@@ -225,7 +225,7 @@ def bench_contract(tmp_path: Path) -> ProcessorStateSnapshot:
 
 
 def test_the_shipping_config_passes(tmp_path: Path) -> None:
-    """Dark Magic and PureTone on is the wall the show runs, not a fault.
+    """Dark Magic and PureTone on is the display the show runs, not a fault.
 
     They correct LED driver non-linearity and PWM resolution loss below
     the layer any OCIO config can reach; a gate that refused them would
@@ -347,7 +347,7 @@ def test_neutral_gains_and_no_limit_pass() -> None:
 def test_an_intensity_gain_below_full_refuses() -> None:
     """`brightness` is not the only luminance knob, and the other one is
     invisible in the declared contract: a 50% intensity gain halves the
-    wall while `brightness` still reads 1800."""
+    display while `brightness` still reads 1800."""
     with pytest.raises(ContractViolation) as e:
         audit_output_scaling(
             scaled(gains={"intensity": 50, "red": 100, "green": 100, "blue": 100})
@@ -454,14 +454,14 @@ def test_panel_state_is_never_compared_against_the_processor(
     )
 
 
-# --- the consequence gate: does the wall do what the processor claims? ----
+# --- the consequence gate: does the display do what the processor claims? ----
 
 
 class TestOutputLevel:
     """Sane-defaults plausibility on the measured white anchor.
 
     The contract audit reads what the processor claims. This asks whether
-    the wall actually does it — and catches, without naming, anything the
+    the display actually does it — and catches, without naming, anything the
     API cannot see: Studio Mode, a moved instrument, thermal state, an
     aperture off the panel edge.
     """
@@ -476,14 +476,14 @@ class TestOutputLevel:
             audit_output_level(1035.2, "1800 nits")
         assert "1035" in str(e.value) and "1800" in str(e.value)
 
-    def test_a_wall_brighter_than_declared_is_refused(self) -> None:
+    def test_a_display_brighter_than_declared_is_refused(self) -> None:
         with pytest.raises(ContractViolation) as e:
             audit_output_level(3600.0, "1800 nits")
         assert "3600" in str(e.value)
 
-    def test_a_dark_wall_is_refused_even_without_a_nits_declaration(self) -> None:
+    def test_a_dark_display_is_refused_even_without_a_nits_declaration(self) -> None:
         """No signal, a blocked aperture, or an instrument pointed at the
-        room reads far too low to be a wall showing white — and that is
+        room reads far too low to be a display showing white — and that is
         knowable without any declaration to compare against."""
         with pytest.raises(ContractViolation) as e:
             audit_output_level(0.4, "100%")

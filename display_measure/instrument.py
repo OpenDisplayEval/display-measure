@@ -3,7 +3,7 @@
 Sessions consume instruments structurally: colour-specio's
 ``SpecRadiometer`` and ``Colorimeter`` satisfy the protocols below
 without subclassing, and so do this package's doubles
-(:mod:`display_measure.plausible_wall`) and the disciplined hybrid
+(:mod:`display_measure.plausible_display`) and the disciplined hybrid
 (:mod:`display_measure.hybrid`). `XYZReading` is the concrete reading a
 synthesized or corrected measurement returns — the one shape every
 producer here needs, so none of them roll their own.

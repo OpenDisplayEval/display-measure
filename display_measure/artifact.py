@@ -17,7 +17,7 @@ takes a clock as input, so fixed inputs produce identical bytes — the
 determinism claim is "same inputs, same bytes", not "no timestamps".
 The CLI defaults to the real clock; tests and reproduction runs inject
 a fixed one. The default instrument double is deterministic by
-construction (see `display_measure.plausible_wall`); only the explicitly
+construction (see `display_measure.plausible_display`); only the explicitly
 requested random instrument involves an RNG, seeded at wiring time.
 
 Rendering is deterministic by construction: fixed key order, fixed
@@ -66,7 +66,7 @@ class InstrumentIdentity:
 # corrects the LED and driver non-linearity that otherwise casts the
 # shadows off-neutral as each primary runs out of PWM resolution. Both
 # fix constraints below the layer any OCIO config can reach, so the
-# recommendation is to leave them on and measure the wall that ships.
+# recommendation is to leave them on and measure the display that ships.
 CONTENT_INDEPENDENT_FEATURES = ("dark-magic", "puretone", "extended-bit-depth")
 
 # Content-dependent processing adapts to the frames around it, so one code
@@ -186,7 +186,7 @@ class ProcessorStateSnapshot:
 # A real rig states its own contract in the show manifest; this constant
 # only has to be a defensible default, and the defensible default is the
 # panel's own linearization on and its frame-adaptive processing off.
-# Lives beside the type so the wall double can derive its decode gamma
+# Lives beside the type so the display double can derive its decode gamma
 # from it without importing the session.
 DECLARED_CONTRACT = ProcessorStateSnapshot(
     eotf_type="GAMMA",
@@ -416,7 +416,7 @@ def render(artifact: MeasurementsArtifact) -> str:
         f"  black_level: {_fmt(artifact.black_level)}",
         f"  peak_luminance: {_fmt(artifact.peak_luminance)}",
         "",
-        "# Ambient floor at measurement time, cd/m² (wall showing black;",
+        "# Ambient floor at measurement time, cd/m² (display showing black;",
         "# reflected ambient plus panel leakage).",
         f"ambient_floor: {_fmt(artifact.ambient_floor)}",
         "",

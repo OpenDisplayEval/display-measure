@@ -1,7 +1,7 @@
-"""A deterministic, physically plausible LED-wall double (§spec:sessions).
+"""A deterministic, physically plausible display double (§spec:sessions).
 
 Couples the two doubles seams: reads the frame most recently driven to
-the mock DeckLink and synthesizes the reading a real wall would produce
+the mock DeckLink and synthesizes the reading a real display would produce
 for that drive. The model is a simple additive display:
 
     XYZ = black_XYZ + sum(channel_drive_linearized * primary_XYZ)
@@ -11,11 +11,11 @@ Deterministic by construction — no RNG anywhere — so byte-identical
 artifacts need no seed, and the synthesized measurements pass strict
 downstream validation. The double is deliberately model-shaped: it
 embodies exactly the additivity + pure-power-law model the
-characterize protocol exists to falsify on real walls, so it can never
+characterize protocol exists to falsify on real displays, so it can never
 grade that protocol — a double that disagrees with its device is worse
 than none, and grading it is the bench rig's job (§spec:sessions).
 
-`MismatchedColorimeter` reads the same wall through a fixed filter
+`MismatchedColorimeter` reads the same display through a fixed filter
 mismatch, giving the disciplined-colorimeter session two disagreeing
 instruments to reconcile without hardware.
 """
@@ -29,9 +29,9 @@ from bmd_sg.decklink import PixelFormatType
 from display_measure.artifact import DECLARED_CONTRACT
 from display_measure.instrument import XYZReading
 
-# Wall model constants copied from ocio-display-gen's shipped sample
+# Display model constants copied from ocio-display-gen's shipped sample
 # measurements (measurements/ftg_stage1_20240115.yaml — a ROE Black
-# Pearl 2 (NS) class wall behind a Brompton S8): native primaries and
+# Pearl 2 (NS) class display behind a Brompton S8): native primaries and
 # white point (CIE xy), black level and peak luminance (cd/m²).
 RED_XY = (0.680, 0.320)
 GREEN_XY = (0.265, 0.690)
@@ -43,7 +43,7 @@ BLACK_LEVEL = 0.005
 
 def _contract_gamma() -> float:
     """The declared contract's decode gamma, narrowed from its
-    Optional field — derived, so wall and contract cannot drift
+    Optional field — derived, so display and contract cannot drift
     (§spec:signal-contract)."""
     gamma = DECLARED_CONTRACT.gamma_value
     if gamma is None:
@@ -85,7 +85,7 @@ _PRIMARY_XYZ = _primary_columns()
 
 
 class FrameSource(Protocol):
-    """The slice of the mock DeckLink's public surface the wall reads."""
+    """The slice of the mock DeckLink's public surface the display reads."""
 
     @property
     def pixel_format(self) -> PixelFormatType: ...
@@ -93,7 +93,7 @@ class FrameSource(Protocol):
     def get_last_frame(self) -> npt.NDArray[np.uint16] | None: ...
 
 
-class PlausibleWall:
+class PlausibleDisplay:
     """Synthesizes the instrument reading for the frame being driven.
 
     Satisfies the session's ``Instrument`` protocol; identity strings
@@ -101,7 +101,7 @@ class PlausibleWall:
     """
 
     manufacturer = "display-measure"
-    model = "PlausibleWall"
+    model = "PlausibleDisplay"
     serial_number = "ftg_stage1_20240115"
 
     def __init__(self, device: FrameSource, *, ambient: float = 0.0) -> None:
@@ -114,16 +114,18 @@ class PlausibleWall:
     def measure(self) -> XYZReading:
         frame = self._device.get_last_frame()
         if frame is None:
-            raise RuntimeError("PlausibleWall cannot measure: no frame has been driven")
+            raise RuntimeError(
+                "PlausibleDisplay cannot measure: no frame has been driven"
+            )
         full_drive = 2**self._device.pixel_format.bit_depth - 1
-        # A spot instrument aimed at the wall center.
+        # A spot instrument aimed at the display center.
         spot = frame[frame.shape[0] // 2, frame.shape[1] // 2]
         linear = (spot.astype(np.float64) / full_drive) ** DECODE_GAMMA
         return XYZReading(XYZ=self._ambient_xyz + _BLACK_XYZ + _PRIMARY_XYZ @ linear)
 
 
 # The colorimeter's filter/observer mismatch, as the fixed 3x3 relating
-# its XYZ to a spectroradiometer's on this wall's primaries. Percent-
+# its XYZ to a spectroradiometer's on this display's primaries. Percent-
 # scale off-diagonal terms stand in for the error a tristimulus
 # colorimeter makes on narrow-band LED emitters (§spec:sessions). A
 # single matrix is exactly the error the four-color method corrects, so
@@ -139,10 +141,10 @@ FILTER_MISMATCH = np.array(
 
 
 class MismatchedColorimeter:
-    """A colorimeter double reading `PlausibleWall` through the mismatch.
+    """A colorimeter double reading `PlausibleDisplay` through the mismatch.
 
     Satisfies the session's ``Instrument`` protocol. Deterministic, and
-    it shares the wall, so a hybrid session's two instruments always see
+    it shares the display, so a hybrid session's two instruments always see
     the same driven frame.
     """
 
@@ -150,8 +152,8 @@ class MismatchedColorimeter:
     model = "MismatchedColorimeter"
     serial_number = "filter-mismatch-1"
 
-    def __init__(self, wall: PlausibleWall) -> None:
-        self._wall = wall
+    def __init__(self, display: PlausibleDisplay) -> None:
+        self._display = display
 
     def measure(self) -> XYZReading:
-        return XYZReading(XYZ=FILTER_MISMATCH @ self._wall.measure().XYZ)
+        return XYZReading(XYZ=FILTER_MISMATCH @ self._display.measure().XYZ)

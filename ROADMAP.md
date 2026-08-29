@@ -12,7 +12,7 @@ The session core arrives here from color-wrangler and takes over as
 the one tool that touches instruments and signal hardware
 (`§spec:session-ownership`). The scaffold lands first, the hardware
 path follows, and only then does the old path retire — so no window
-exists in which neither repository can measure a wall.
+exists in which neither repository can measure a display.
 
 ### Move the bench path §road:move-bench-path
 
@@ -41,6 +41,14 @@ session, for checking a rig before booking it. §spec:session-gates.
 Replace the operator attestation of the panel-resident operating mode
 with a reading, where the processor exposes one. §spec:session-gates.
 The attestation stays until a reading is proven equivalent.
+
+### Carry the pre-session gates on the event stream §road:pre-session-gate-events
+
+Open the session's event stream early enough that the hardware path's
+processor audit reports its gates on it. Today the wire-format and
+output-scaling gates refuse before the stream exists, so a consumer
+sees a refusal with no gate behind it. §spec:session-events,
+§spec:session-gates.
 
 **Verify:** a session against a rig whose intensity, gamma, processing
 features, wire format or ambient floor contradicts the manifest exits
