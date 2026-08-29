@@ -1,14 +1,21 @@
 """The characterize session core (§spec:sessions).
 
-One shared flow, each stage a function observable in the session log:
+One shared flow, each stage a function that reports itself as an event:
 contract audit, ambient gate, patch drive, settle, instrument read,
 handoff — `characterize` is their composition. The session drives the
 versioned patch protocol (`display_measure.protocol`, MEASUREMENT.md) in
 shuffled presentation order and emits the immutable measurements
 artifact (§spec:artifact-chain). The gates that do not yet hold
-anything log themselves as stubs, so the seams exist before
+anything report themselves as stubs, so the seams exist before
 §road:session-gates fills them; verify-mode composes the same gate
 functions unchanged.
+
+The core narrates through `emit` and never through a logger
+(§spec:session-events). One seam, N consumers: the session log
+(`display_measure.session_log`) is one of them and the operator UI in
+color-wrangler is another, so nothing here knows what a frontend
+looks like. `emit` defaults to the log renderer, which keeps a library
+caller and the CLI on the same path rather than privileging either.
 
 Determinism: see the determinism-seam design in
 `display_measure.artifact`'s module docstring.
@@ -17,7 +24,8 @@ Determinism: see the determinism-seam design in
 import hashlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -42,8 +50,24 @@ from display_measure.artifact import (
     ResponsePoint,
     write,
 )
+from display_measure.events import (
+    EventSink,
+    Gate,
+    GateEvaluated,
+    GateVerdict,
+    HandoffCompleted,
+    Outcome,
+    PatchCompleted,
+    PatchSettling,
+    PatchStarted,
+    PlaybackStarted,
+    SessionEnded,
+    SessionMode,
+    SessionStarted,
+)
 from display_measure.hybrid import (
     DEFAULT_LUMINANCE_THRESHOLD,
+    DerivationRefused,
     DisciplinedInstrument,
     HybridInstrument,
 )
@@ -77,6 +101,7 @@ from display_measure.protocol import (
     presentation_order,
     protocol_patches,
 )
+from display_measure.session_log import log_events
 
 __all__ = [
     "FULL_DRIVE",
@@ -103,6 +128,10 @@ DECLARED_WIRE_FORMAT = WireFormat(
     hdr_format="standard-dynamic-range",
 )
 
+# Pre-session narration only — instrument discovery and the processor
+# pre-audit run before `characterize` opens the event stream, so there
+# is nothing to emit into yet. Everything inside a session goes through
+# `emit` (§spec:session-events); nothing here is a second path for it.
 log = logging.getLogger("display_measure.session")
 
 Clock = Callable[[], datetime]
@@ -134,23 +163,59 @@ def _frame(rgb: tuple[int, int, int]) -> npt.NDArray[np.uint16]:
     return np.full((FRAME_HEIGHT, FRAME_WIDTH, 3), rgb, dtype=np.uint16)
 
 
+@contextmanager
+def _gate(emit: EventSink, gate: Gate) -> Iterator[None]:
+    """Report a refusal as the gate's own outcome before it propagates.
+
+    A session-end event carries the message but not the check that
+    produced it, and "the wall measures 0.56x its declared intensity"
+    calls for a different trip than "the processor has overdrive on".
+    Naming the gate is what lets a consumer show the operator where to
+    go (§spec:web-ui).
+    """
+    try:
+        yield
+    except ContractViolation as e:
+        emit(GateEvaluated(gate, GateVerdict.REFUSED, str(e)))
+        raise
+
+
+@contextmanager
+def _session_outcome(emit: EventSink, clock: Clock) -> Iterator[None]:
+    """Close the stream with exactly one `SessionEnded`, on every path.
+
+    A consumer's progress display waits forever on a session that
+    stopped without saying so, and the paths that stop one — a gate
+    refusing, an instrument raising, an operator cancelling — are
+    exactly the ones nobody remembers to instrument by hand.
+
+    The failure outcomes are distinguished because the operator's next
+    move differs: refused sends them to the rig, failed to a bug report.
+    """
+    try:
+        yield
+    except (ContractViolation, DerivationRefused) as e:
+        emit(SessionEnded(Outcome.REFUSED, clock(), str(e)))
+        raise
+    except Exception as e:
+        emit(SessionEnded(Outcome.FAILED, clock(), f"{type(e).__name__}: {e}"))
+        raise
+    emit(SessionEnded(Outcome.COMPLETED, clock()))
+
+
 def ambient_gate(reading: InstrumentReading) -> float:
     """Ambient gate (§spec:sessions): returns the recorded floor.
 
     Consumes the session's opening black reading. STUB until
-    §road:session-gates: the budget refusal is not enforced.
-    verify-mode composes this gate unchanged.
+    §road:session-gates: the budget refusal is not enforced, which the
+    gate's own event says out loud — a consumer that rendered an unrun
+    check as a pass would be claiming a gate nobody held. verify-mode
+    composes this gate unchanged.
     """
-    floor = luminance(reading)
-    log.info(
-        "ambient gate: STUB — recorded floor %.4f cd/m²; budget not "
-        "enforced (§road:session-gates)",
-        floor,
-    )
-    return floor
+    return luminance(reading)
 
 
-def _setup_drive(device: PatchDrive) -> None:
+def _setup_drive(device: PatchDrive, emit: EventSink) -> None:
     """Declare pixel format and EOTF signaling, then start playback.
 
     bmd-signal-gen defaults to PQ InfoFrames, which would fault an
@@ -160,20 +225,21 @@ def _setup_drive(device: PatchDrive) -> None:
     device.pixel_format = PATCH_PIXEL_FORMAT
     device.set_hdr_metadata(HDRMetadata(eotf=EOTFType.SDR))
     device.start_playback()
-    log.info(
-        "patch drive: %s with explicit %s signaling",
-        PATCH_PIXEL_FORMAT.name,
-        EOTFType.SDR.name,
-    )
+    # The enum names, not the enums: an event crossing a wire should
+    # not drag bmd-signal-gen in behind it.
+    emit(PlaybackStarted(PATCH_PIXEL_FORMAT.name, EOTFType.SDR.name))
 
 
-def _drive(device: PatchDrive, patch: Patch) -> None:
-    log.info("patch drive: %s %r on %s", patch.name, patch.rgb, PATCH_PIXEL_FORMAT.name)
+def _drive(device: PatchDrive, patch: Patch, index: int, emit: EventSink) -> None:
+    emit(PatchStarted(index, patch.name, patch.rgb))
     device.display_frame(_frame(patch.rgb))
 
 
-def _settle(seconds: float) -> None:
-    log.info("settle: %.3f s", seconds)
+def _settle(seconds: float, index: int, emit: EventSink) -> None:
+    # Announced before the wait, not after: a settle and an instrument
+    # read are where a session sits still, and saying so as it starts
+    # is what makes a run auditable while it happens (§spec:sessions).
+    emit(PatchSettling(index, seconds))
     time.sleep(seconds)
 
 
@@ -182,30 +248,12 @@ def _read(instrument: Instrument, patch: Patch) -> InstrumentReading:
     # the patch is already in hand here, which keeps the instrument
     # from shadowing the session's own iteration (§spec:sessions).
     if isinstance(instrument, DisciplinedInstrument):
-        measurement = instrument.measure_patch(patch.name)
-    else:
-        measurement = instrument.measure()
-    log.info(
-        "instrument read: %s XYZ=%s",
-        patch.name,
-        np.array2string(measurement.XYZ, precision=4),
-    )
-    return measurement
-
-
-def _drive_and_read(
-    device: PatchDrive,
-    instrument: Instrument,
-    patch: Patch,
-    settle_seconds: float,
-) -> InstrumentReading:
-    """One patch through the drive, settle, read stages."""
-    _drive(device, patch)
-    _settle(settle_seconds)
-    return _read(instrument, patch)
+        return instrument.measure_patch(patch.name)
+    return instrument.measure()
 
 
 def _log_instrument(instrument: Instrument, note: str = "") -> None:
+    """Narrate a discovered instrument. Pre-session; see `log` above."""
     who = identity(instrument)
     log.info(
         "instrument: %s %s (serial %s)%s",
@@ -216,14 +264,10 @@ def _log_instrument(instrument: Instrument, note: str = "") -> None:
     )
 
 
-def _handoff(artifact: MeasurementsArtifact, out_path: Path) -> None:
-    """Write the immutable artifact and log its hash."""
+def _handoff(artifact: MeasurementsArtifact, out_path: Path, emit: EventSink) -> None:
+    """Write the immutable artifact and report its hash."""
     data = write(artifact, out_path)
-    log.info(
-        "handoff: wrote %s (sha256 %s)",
-        out_path,
-        hashlib.sha256(data).hexdigest(),
-    )
+    emit(HandoffCompleted(str(out_path), hashlib.sha256(data).hexdigest()))
 
 
 def _ramp(
@@ -256,6 +300,7 @@ def characterize(
     seed: int = 0,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
     reading: ProcessorStateSnapshot | None = None,
+    emit: EventSink = log_events,
 ) -> None:
     """Run one characterize session and write the measurements artifact.
 
@@ -269,25 +314,74 @@ def characterize(
     patches its correction needs driven first and reports its routing
     into the artifact; drive, settle, and read are the same stages
     either way.
+
+    Reports its whole lifecycle to `emit` (§spec:session-events),
+    which defaults to the session log.
     """
     session_start = clock()
-
-    # The contract audit gates the session: nothing is driven until the
-    # processor is known to match what was declared (§spec:sessions).
-    recorded_state = audit_contract(declared, reading)
-    log.info(
-        "contract audit: PASS — gamma %s, intensity %s, processing %s",
-        recorded_state.gamma_value,
-        recorded_state.intensity,
-        ", ".join(sorted(recorded_state.processing_enabled)) or "all off",
+    emit(
+        SessionStarted(
+            mode=SessionMode.CHARACTERIZE,
+            protocol_name=PROTOCOL_NAME,
+            patch_count=len(protocol_patches()),
+            at=session_start,
+        )
     )
-    if recorded_state.panel_state:
-        log.info(
-            "panel state: ATTESTED, not read — %s",
-            "; ".join(f"{k}={v}" for k, v in recorded_state.panel_state),
+    with _session_outcome(emit, clock):
+        _characterize(
+            device,
+            instrument,
+            out_path,
+            clock=clock,
+            settle_seconds=settle_seconds,
+            seed=seed,
+            declared=declared,
+            reading=reading,
+            emit=emit,
+            session_start=session_start,
         )
 
-    _setup_drive(device)
+
+def _characterize(
+    device: PatchDrive,
+    instrument: Instrument,
+    out_path: Path,
+    *,
+    clock: Clock,
+    settle_seconds: float,
+    seed: int,
+    declared: ProcessorStateSnapshot,
+    reading: ProcessorStateSnapshot | None,
+    emit: EventSink,
+    session_start: datetime,
+) -> None:
+    """The session body `characterize` brackets with start and end events."""
+    # The contract audit gates the session: nothing is driven until the
+    # processor is known to match what was declared (§spec:sessions).
+    with _gate(emit, Gate.CONTRACT_AUDIT):
+        recorded_state = audit_contract(declared, reading)
+    emit(
+        GateEvaluated(
+            Gate.CONTRACT_AUDIT,
+            GateVerdict.PASS,
+            f"gamma {recorded_state.gamma_value}, "
+            f"intensity {recorded_state.intensity}, processing "
+            f"{', '.join(sorted(recorded_state.processing_enabled)) or 'all off'}",
+        )
+    )
+    if recorded_state.panel_state:
+        # ATTESTED is not a pass: no leaf of the processor's API reports
+        # any of this, so the gate carries what the operator confirmed
+        # rather than comparing it (§spec:session-gates).
+        emit(
+            GateEvaluated(
+                Gate.PANEL_STATE,
+                GateVerdict.ATTESTED,
+                "; ".join(f"{k}={v}" for k, v in recorded_state.panel_state),
+            )
+        )
+
+    _setup_drive(device, emit)
 
     # The session opens on black — presentation_order pins it first;
     # the ambient gate consumes that opening reading and black_level
@@ -308,34 +402,21 @@ def characterize(
     if disciplined is not None:
         pinned = (*disciplined.derivation_patches(), *OPENING_PINS)
     presented = presentation_order(protocol_patches(), seed, pinned=pinned)
-    readings: dict[str, InstrumentReading] = {}
-    patch_seconds: list[float] = []
-
-    def timed_read(patch: Patch) -> InstrumentReading:
-        began = clock()
-        measurement = _drive_and_read(device, instrument, patch, settle_seconds)
-        patch_seconds.append((clock() - began).total_seconds())
-        return measurement
-
-    ambient_floor: float | None = None
-    for patch in presented:
-        readings[patch.name] = timed_read(patch)
-        if patch.name == BLACK_PATCH:
-            # Gated the moment black is read, not at handoff: the budget
-            # refusal §road:session-gates adds has to stop a session
-            # early to be worth anything.
-            ambient_floor = ambient_gate(readings[patch.name])
-        elif patch.name == WHITE_PATCH:
-            # Gated where white is read, which protocol 3 pins second:
-            # the contract audit established what the processor claims,
-            # and this is where the wall either does it or does not.
-            audit_output_level(luminance(readings[patch.name]), declared.intensity)
-    if ambient_floor is None:
-        raise RuntimeError(
-            f"the protocol drove no {BLACK_PATCH!r} patch; the ambient gate "
-            "has nothing to consume"
+    try:
+        readings, patch_seconds, ambient_floor = _drive_presentation(
+            device,
+            instrument,
+            presented,
+            clock=clock,
+            settle_seconds=settle_seconds,
+            declared_intensity=declared.intensity,
+            emit=emit,
         )
-    device.stop_playback()
+    finally:
+        # Playback stops however the session leaves the loop — handed
+        # off, refused or failed. A wall left holding the last patch
+        # after a session ends is a rig in an unknown state.
+        device.stop_playback()
 
     session_end = clock()
     protocol = protocol_patches()
@@ -366,9 +447,76 @@ def characterize(
             magenta_xyz=xyz(readings["magenta"]),
         ),
         instrument_routing=None if disciplined is None else disciplined.routing(),
-        patch_seconds=tuple(patch_seconds),
+        patch_seconds=patch_seconds,
     )
-    _handoff(artifact, out_path)
+    _handoff(artifact, out_path, emit)
+
+
+def _drive_presentation(
+    device: PatchDrive,
+    instrument: Instrument,
+    presented: tuple[Patch, ...],
+    *,
+    clock: Clock,
+    settle_seconds: float,
+    declared_intensity: str,
+    emit: EventSink,
+) -> tuple[dict[str, InstrumentReading], tuple[float, ...], float]:
+    """Drive every patch; return the readings, their durations, and the floor.
+
+    Each patch is one drive-settle-read step, timed end to end by the
+    session clock so a consumer estimates the remaining time from
+    observed pace (§spec:session-events).
+    """
+    readings: dict[str, InstrumentReading] = {}
+    patch_seconds: list[float] = []
+    ambient_floor: float | None = None
+
+    for index, patch in enumerate(presented, start=1):
+        began = clock()
+        _drive(device, patch, index, emit)
+        _settle(settle_seconds, index, emit)
+        measurement = _read(instrument, patch)
+        seconds = (clock() - began).total_seconds()
+        readings[patch.name] = measurement
+        patch_seconds.append(seconds)
+        emit(PatchCompleted(index, patch.name, xyz(measurement), seconds))
+
+        if patch.name == BLACK_PATCH:
+            # Gated the moment black is read, not at handoff: the budget
+            # refusal §road:session-gates adds has to stop a session
+            # early to be worth anything.
+            ambient_floor = ambient_gate(measurement)
+            emit(
+                GateEvaluated(
+                    Gate.AMBIENT,
+                    GateVerdict.STUB,
+                    f"recorded floor {ambient_floor:.4f} cd/m²; budget not "
+                    "enforced (§road:session-gates)",
+                )
+            )
+        elif patch.name == WHITE_PATCH:
+            # Gated where white is read, which protocol 3 pins second:
+            # the contract audit established what the processor claims,
+            # and this is where the wall either does it or does not.
+            peak = luminance(measurement)
+            with _gate(emit, Gate.OUTPUT_LEVEL):
+                audit_output_level(peak, declared_intensity)
+            emit(
+                GateEvaluated(
+                    Gate.OUTPUT_LEVEL,
+                    GateVerdict.PASS,
+                    f"white measured {peak:.4g} cd/m² against "
+                    f"{declared_intensity} declared",
+                )
+            )
+
+    if ambient_floor is None:
+        raise RuntimeError(
+            f"the protocol drove no {BLACK_PATCH!r} patch; the ambient gate "
+            "has nothing to consume"
+        )
+    return readings, tuple(patch_seconds), ambient_floor
 
 
 def normalized_reading(
@@ -392,6 +540,7 @@ def doubles_session(
     hybrid: bool = False,
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
+    emit: EventSink = log_events,
 ) -> MockBMDDeckLink:
     """Run one characterize session against the device doubles.
 
@@ -437,6 +586,7 @@ def doubles_session(
             seed=seed if seed is not None else 0,
             declared=declared,
             reading=normalized_reading(declared),
+            emit=emit,
         )
     return device
 
@@ -469,6 +619,7 @@ def hardware_session(
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
     processor_host: str | None = None,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
+    emit: EventSink = log_events,
 ) -> None:
     """Run one characterize session against the bench instruments.
 
@@ -511,4 +662,5 @@ def hardware_session(
             settle_seconds=settle_seconds,
             declared=declared,
             reading=reading,
+            emit=emit,
         )

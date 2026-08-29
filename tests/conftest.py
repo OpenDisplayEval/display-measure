@@ -3,7 +3,13 @@
 Session-scoped so the CLI tests can compare bytes against the same run
 the session tests assert on. Separate runs happen only where the test
 needs one: the second determinism run, the random-instrument divergence
-run, and the overwrite refusal.
+run, the overwrite refusal, and the event-stream run.
+
+`wall_run` deliberately takes the *default* sink, so what it captures is
+the log a library caller gets for free; `wall_events` collects the same
+session as events with no log attached. Two runs, not one, so the
+log-renders-the-stream test compares two independent paths rather than
+comparing a stream against itself (§spec:session-events).
 """
 
 import io
@@ -16,6 +22,7 @@ import numpy as np
 import pytest
 from bmd_sg.decklink import MockBMDDeckLink
 
+from display_measure.events import SessionEvent
 from display_measure.protocol import PATCH_PIXEL_FORMAT
 from display_measure.session import Clock, doubles_session
 
@@ -76,6 +83,25 @@ def wall_log(wall_run: tuple[Path, str, MockBMDDeckLink]) -> str:
 @pytest.fixture(scope="session")
 def wall_device(wall_run: tuple[Path, str, MockBMDDeckLink]) -> MockBMDDeckLink:
     return wall_run[2]
+
+
+@pytest.fixture(scope="session")
+def wall_events(
+    tmp_path_factory: pytest.TempPathFactory,
+    fixed_clock: Clock,
+) -> tuple[tuple[SessionEvent, ...], Path]:
+    """One plausible-wall session collected as events: the stream and its artifact."""
+    out = tmp_path_factory.mktemp("events") / "measurements.yaml"
+    collected: list[SessionEvent] = []
+    doubles_session(out, clock=fixed_clock, settle_seconds=0.0, emit=collected.append)
+    return tuple(collected), out
+
+
+@pytest.fixture(scope="session")
+def wall_stream(
+    wall_events: tuple[tuple[SessionEvent, ...], Path],
+) -> tuple[SessionEvent, ...]:
+    return wall_events[0]
 
 
 @pytest.fixture(scope="session")

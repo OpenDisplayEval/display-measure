@@ -270,7 +270,7 @@ def test_the_level_gate_stops_the_session_at_white(
     driven = [
         r.getMessage()
         for r in caplog.records
-        if r.getMessage().startswith("patch drive: ") and " on " in r.getMessage()
+        if r.getMessage().startswith("patch drive: ")
     ]
     assert len(driven) == 2, driven
     assert "black" in driven[0] and "white" in driven[1]
