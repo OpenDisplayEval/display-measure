@@ -211,6 +211,10 @@ def _session_outcome(emit: EventSink, clock: Clock) -> Iterator[None]:
     The three failure outcomes are distinguished because the operator's
     next move differs: cancelled is what they asked for, refused sends
     them to the rig, and failed sends them to a bug report.
+
+    A `BaseException` passes through unreported — the second Ctrl-C
+    after the CLI's handler stands down is one, and aborting now is
+    exactly what it means.
     """
     try:
         yield
