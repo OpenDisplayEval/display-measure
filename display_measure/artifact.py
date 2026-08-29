@@ -94,6 +94,35 @@ PROCESSING_FEATURES = CONTENT_INDEPENDENT_FEATURES + CONTENT_DEPENDENT_FEATURES
 PANEL_STATE_KEYS = ("operating_mode", "selected_calibration")
 
 
+# The artifact is rendered by hand (see `render`), so a string reaching a
+# double-quoted YAML scalar has to be representable there. A double quote
+# closes the scalar and a newline ends the line, which is not a formatting
+# nuisance but a provenance hole: a newline in an attested value injects a
+# sibling key into `processor_state`, and the artifact still parses, so
+# nothing downstream can tell a machine-written field from one an operator
+# typed.
+#
+# Refused at construction rather than at render. A session builds its
+# declared contract before it drives a patch, so a bad value stops it at
+# the gate; refusing at handoff would throw away the protocol it had just
+# spent measuring.
+_UNRENDERABLE = {'"', "\\"}
+
+
+def _renderable(value: str, field: str) -> str:
+    """The value unchanged, or ValueError naming the field that carries it."""
+    bad = sorted(
+        {c for c in value if c in _UNRENDERABLE or ord(c) < 0x20 or ord(c) == 0x7F}
+    )
+    if bad:
+        raise ValueError(
+            f"{field} carries {bad!r}, which the artifact's "
+            "renderer cannot represent in a double-quoted scalar; a newline "
+            "there would inject a sibling key into the recorded state"
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class ProcessorStateSnapshot:
     """Processor state recorded with the measurements (§spec:signal-contract).
@@ -119,6 +148,10 @@ class ProcessorStateSnapshot:
                 "gamma_value is required for GAMMA and forbidden otherwise; "
                 f"got eotf_type={self.eotf_type!r}, gamma_value={self.gamma_value!r}"
             )
+        _renderable(self.intensity, "intensity")
+        _renderable(self.eotf_type, "eotf_type")
+        for key, value in self.panel_state:
+            _renderable(value, key)
         unknown = self.processing_enabled - set(PROCESSING_FEATURES)
         if unknown:
             raise ValueError(

@@ -8,6 +8,8 @@ import pytest
 import yaml
 
 from display_measure.artifact import (
+    DECLARED_CONTRACT,
+    SCHEMA,
     SOURCE_COLORIMETER,
     SOURCE_SPECTRORADIOMETER,
     AdditivityTriad,
@@ -245,3 +247,56 @@ def test_patch_seconds_render_and_length_validation() -> None:
         replace(timed, patch_seconds=(0.5,))
     with pytest.raises(ValueError, match="patch_seconds"):
         replace(sample_artifact(), patch_seconds=(0.5,))
+
+
+def test_schema_keeps_the_name_it_was_promoted_under() -> None:
+    """A wire identifier, pinned so a rename sweep cannot quietly move it.
+
+    The package renamed from color_wrangler to display_measure and this
+    string deliberately did not follow. Every promoted artifact carries
+    it and downstream loaders dispatch on it, so a mechanical
+    find-replace across the repository would corrupt the provenance of
+    measurements already accepted. `PROTOCOL_NAME` is pinned the same
+    way in tests/test_protocol.py; this closes the asymmetry.
+    """
+    assert SCHEMA == "color-wrangler/measurements/1"
+
+
+# --- operator strings cannot corrupt the record ---------------------------
+
+
+class TestRenderableStrings:
+    """The artifact is rendered by hand for byte-determinism, so a string
+    carrying YAML syntax would escape its field. The constraint belongs to
+    the record type rather than the renderer: a session that refuses at
+    construction stops before it measures, where one that refused at
+    handoff would throw away the protocol it had just spent.
+    """
+
+    def state(self, **panel: str) -> ProcessorStateSnapshot:
+        return replace(DECLARED_CONTRACT, panel_state=tuple(sorted(panel.items())))
+
+    def test_a_plain_attestation_is_accepted(self) -> None:
+        s = self.state(
+            operating_mode="Normal Mode",
+            selected_calibration="Internal Colour Cal (Factory)",
+        )
+        assert dict(s.panel_state)["operating_mode"] == "Normal Mode"
+
+    def test_a_newline_is_refused(self) -> None:
+        """The dangerous one: it injects a sibling key and the artifact
+        still parses, so nothing downstream can tell."""
+        with pytest.raises(ValueError, match="operating_mode"):
+            self.state(operating_mode='x"\n  injected: "yes', selected_calibration="c")
+
+    def test_a_double_quote_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="selected_calibration"):
+            self.state(operating_mode="Normal Mode", selected_calibration='Cal "A"')
+
+    def test_a_control_character_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="operating_mode"):
+            self.state(operating_mode="Normal\x07Mode", selected_calibration="c")
+
+    def test_the_intensity_field_is_guarded_too(self) -> None:
+        with pytest.raises(ValueError, match="intensity"):
+            replace(DECLARED_CONTRACT, intensity='1800" nits\n  injected: "yes')
