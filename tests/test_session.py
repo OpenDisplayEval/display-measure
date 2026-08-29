@@ -10,6 +10,7 @@ import yaml
 from bmd_sg.decklink import EOTFType, MockBMDDeckLink, PixelFormatType
 
 from display_measure.artifact import DECLARED_CONTRACT
+from display_measure.consistency import InconsistentSession
 from display_measure.hybrid import DERIVATION_PATCHES
 from display_measure.processor import ContractViolation
 from display_measure.protocol import (
@@ -35,15 +36,25 @@ def test_identical_inputs_give_identical_bytes(
     assert second.read_bytes() == wall_artifact.read_bytes()
 
 
-def test_random_instrument_stays_reachable_and_diverges(
-    wall_artifact: Path, fixed_clock: Clock, tmp_path: Path
+def test_the_random_instrument_is_reachable_and_its_numbers_are_refused(
+    fixed_clock: Clock, tmp_path: Path
 ) -> None:
-    # The physics-free virtual spectrometer validates plumbing only; its
-    # readings ignore the driven frame, so its artifact diverges from
-    # the wall model's.
+    """The physics-free virtual spectrometer validates plumbing only.
+
+    It ignores the driven frame, so its ramps do not rise and the
+    self-consistency gate refuses to write an artifact from them
+    (§road:session-consistency). Reaching that gate is what proves the
+    seam: the session drove the protocol, read the instrument, assembled
+    an artifact, and only then judged the numbers.
+
+    There is deliberately no bypass. A flag that let a session skip this
+    check would be used in anger the first time a rig misbehaved at
+    2 a.m., which is precisely when the artifact matters most.
+    """
     divergent = tmp_path / "random.yaml"
-    doubles_session(divergent, clock=fixed_clock, settle_seconds=0.0, seed=0)
-    assert divergent.read_bytes() != wall_artifact.read_bytes()
+    with pytest.raises(InconsistentSession):
+        doubles_session(divergent, clock=fixed_clock, settle_seconds=0.0, seed=0)
+    assert not divergent.exists(), "a refused session writes no artifact"
 
 
 def test_artifact_measurements_route_sensibly(wall_artifact: Path) -> None:

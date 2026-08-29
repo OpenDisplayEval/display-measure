@@ -80,6 +80,10 @@ class Gate(StrEnum):
     AMBIENT = "ambient-gate"
     OUTPUT_LEVEL = "output-level"
     DERIVATION_FITNESS = "derivation-fitness"
+    # The only gate that resolves after the protocol rather than before
+    # it: a ramp is not a ramp until it is measured. It refuses the
+    # artifact, not the session's time (§road:session-consistency).
+    SELF_CONSISTENCY = "self-consistency"
 
 
 class GateVerdict(StrEnum):

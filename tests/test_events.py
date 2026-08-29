@@ -137,6 +137,9 @@ def test_every_gate_the_session_holds_reports_an_outcome(
         Gate.CONTRACT_AUDIT: GateVerdict.PASS,
         Gate.AMBIENT: GateVerdict.STUB,
         Gate.OUTPUT_LEVEL: GateVerdict.PASS,
+        # The only gate that resolves after the protocol: a ramp is not a
+        # ramp until it is measured (§road:session-consistency).
+        Gate.SELF_CONSISTENCY: GateVerdict.PASS,
     }
 
 

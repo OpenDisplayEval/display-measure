@@ -193,6 +193,36 @@ started to end. They reach the operator as the command's refusal until
 §road:pre-session-gate-events opens the stream early enough to carry
 them.
 
+### Self-consistency §spec:self-consistency
+
+*Status: complete*
+
+A session refuses to write an artifact whose own rows contradict each
+other: a ramp whose luminance falls as its code rises, or two
+instruments that disagree by an order of magnitude where they hand
+over.
+
+**Why this one resolves late.** Every other gate refuses before the
+protocol is spent, because a refusal costing a round trip beats one
+costing a rig. A ramp is not a ramp until it is measured, so this can
+only judge at the end. What it still prevents is the artifact — and the
+artifact is what outlives the session. A measurement that contradicts
+itself never enters the chain to be promoted later by someone who was
+not in the room.
+
+**Why there is no bypass.** A flag to skip the check would be reached
+for the first time a rig misbehaved at 2 a.m., which is exactly when
+the artifact matters most. The physics-free virtual spectrometer is
+consequently refused too, and its test asserts that: reaching the gate
+is what proves the seam, and the numbers behind it were never meant to
+be believed.
+
+**Why an order of magnitude at the boundary.** Adjacent protocol codes
+step by 3/2 or 4/3, which through a ~2.3 exponent is a luminance step
+near 1.9x, so a step across the handover is expected to be large. The
+bound admits any real step and refuses the 12.8x collapse that produced
+an artifact nobody could trust.
+
 ## Patch protocol §spec:patch-protocol
 
 *Status: complete*

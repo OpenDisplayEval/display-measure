@@ -55,6 +55,7 @@ from display_measure.artifact import (
     ResponsePoint,
     write,
 )
+from display_measure.consistency import InconsistentSession
 from display_measure.events import (
     Cancelled,
     EventSink,
@@ -484,7 +485,71 @@ def _characterize(
         instrument_routing=None if disciplined is None else disciplined.routing(),
         patch_seconds=patch_seconds,
     )
+    # The last gate, and the only one that cannot refuse early: a ramp is
+    # not a ramp until it is measured. It still prevents the artifact,
+    # which is the thing that outlives the session — a measurement that
+    # contradicts itself never enters the chain to be promoted later by
+    # someone who was not in the room (§road:session-consistency).
+    _audit_self_consistency(artifact, emit)
     _handoff(artifact, out_path, emit)
+
+
+def _audit_self_consistency(artifact: MeasurementsArtifact, emit: EventSink) -> None:
+    """Refuse an artifact whose own rows disagree (§road:session-consistency)."""
+    from display_measure.consistency import (
+        audit_ramp_monotonicity,
+        audit_routing_boundary,
+    )
+
+    ramps = {
+        "gray": [(p.code, p.xyz[1]) for p in artifact.gray_response or ()],
+    }
+    if artifact.per_channel_response is not None:
+        for name in ("red", "green", "blue"):
+            rows = getattr(artifact.per_channel_response, name)
+            ramps[name] = [(p.code, p.xyz[1]) for p in rows]
+
+    with _gate(emit, Gate.SELF_CONSISTENCY, (InconsistentSession,)):
+        audit_ramp_monotonicity({k: v for k, v in ramps.items() if v})
+        routing = artifact.instrument_routing
+        if routing is not None:
+            by_patch = dict(
+                zip(artifact.presentation_order or (), routing.sources, strict=False)
+            )
+            routed = {
+                name: _routed_rows(name, rows, by_patch)
+                for name, rows in ramps.items()
+                if rows
+            }
+            audit_routing_boundary({k: v for k, v in routed.items() if v})
+    emit(
+        GateEvaluated(
+            Gate.SELF_CONSISTENCY,
+            GateVerdict.PASS,
+            "ramps rise and the instruments agree where they hand over",
+        )
+    )
+
+
+def _routed_rows(
+    name: str,
+    rows: list[tuple[int, float]],
+    by_patch: dict[str, str],
+) -> list[tuple[int, float, str]]:
+    """Ramp rows carrying the instrument that produced each one.
+
+    The artifact records sources in presentation order and rows in
+    protocol order, so the patch name is what joins them. A row whose
+    patch is not in the map — the full-drive anchor folded into each
+    ramp — is dropped rather than guessed at.
+    """
+    prefix = "gray" if name == "gray" else name
+    out: list[tuple[int, float, str]] = []
+    for code, y in rows:
+        source = by_patch.get(f"{prefix}_{code:04d}")
+        if source is not None:
+            out.append((code, y, source))
+    return out
 
 
 def _drive_presentation(
