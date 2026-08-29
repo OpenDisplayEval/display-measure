@@ -176,7 +176,11 @@ def never_cancelled() -> bool:
 
 
 @contextmanager
-def _gate(emit: EventSink, gate: Gate) -> Iterator[None]:
+def _gate(
+    emit: EventSink,
+    gate: Gate,
+    refusals: tuple[type[Exception], ...] = (ContractViolation,),
+) -> Iterator[None]:
     """Report a refusal as the gate's own outcome before it propagates.
 
     A session-end event carries the message but not the check that
@@ -184,10 +188,13 @@ def _gate(emit: EventSink, gate: Gate) -> Iterator[None]:
     calls for a different trip than "the processor has overdrive on".
     Naming the gate is what lets a consumer show the operator where to
     go (§spec:web-ui).
+
+    `refusals` names the exceptions this gate refuses with, so a gate
+    only ever claims a failure it actually raised.
     """
     try:
         yield
-    except ContractViolation as e:
+    except refusals as e:
         emit(GateEvaluated(gate, GateVerdict.REFUSED, str(e)))
         raise
 
@@ -510,7 +517,13 @@ def _drive_presentation(
         began = clock()
         _drive(device, patch, index, emit)
         _settle(settle_seconds, index, emit)
-        measurement = _read(instrument, patch)
+        # A disciplined instrument derives its correction from the
+        # rungs it reads first, and refuses here when that correction
+        # is unfit to extrapolate (§spec:session-gates). The gate lives
+        # inside the instrument, so the read is where the session can
+        # name it.
+        with _gate(emit, Gate.DERIVATION_FITNESS, (DerivationRefused,)):
+            measurement = _read(instrument, patch)
         seconds = (clock() - began).total_seconds()
         readings[patch.name] = measurement
         patch_seconds.append(seconds)

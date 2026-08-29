@@ -79,6 +79,7 @@ class Gate(StrEnum):
     PANEL_STATE = "panel-state"
     AMBIENT = "ambient-gate"
     OUTPUT_LEVEL = "output-level"
+    DERIVATION_FITNESS = "derivation-fitness"
 
 
 class GateVerdict(StrEnum):

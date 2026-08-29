@@ -9,7 +9,9 @@ from dataclasses import asdict, is_dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
+from bmd_sg.decklink import MockBMDDeckLink
 
 from display_measure.artifact import DECLARED_CONTRACT
 from display_measure.events import (
@@ -27,9 +29,17 @@ from display_measure.events import (
     SessionMode,
     SessionStarted,
 )
+from display_measure.hybrid import DerivationRefused, HybridInstrument
+from display_measure.instrument import XYZReading
+from display_measure.plausible_wall import PlausibleWall
 from display_measure.processor import ContractViolation
 from display_measure.protocol import PROTOCOL_NAME, protocol_patches
-from display_measure.session import Clock, doubles_session
+from display_measure.session import (
+    Clock,
+    characterize,
+    doubles_session,
+    normalized_reading,
+)
 from display_measure.session_log import log_events
 
 # What an event may carry: values that survive `asdict`, a wire, and
@@ -285,3 +295,54 @@ def test_an_unknown_event_does_not_fail_the_session_it_narrates(
     with caplog.at_level(logging.DEBUG, logger="display_measure"):
         log_events(Invented())
     assert "unrendered session event" in caplog.text
+
+
+class UnfitColorimeter:
+    """A colorimeter double whose disagreement no filter mismatch explains.
+
+    The shipped `MismatchedColorimeter` is fit by construction, so the
+    derivation-fitness gate never fires against it. This one reads the
+    same wall through a gross per-channel skew, which is what an
+    instrument fault looks like from the session's side.
+    """
+
+    manufacturer = "display-measure"
+    model = "UnfitColorimeter"
+    serial_number = "unfit-1"
+
+    def __init__(self, wall: PlausibleWall) -> None:
+        self._wall = wall
+
+    def measure(self) -> XYZReading:
+        skew = np.array([2.5, 0.4, 3.0])
+        return XYZReading(XYZ=skew * self._wall.measure().XYZ)
+
+
+def test_an_unfit_correction_refuses_under_its_own_gate(
+    fixed_clock: Clock, tmp_path: Path
+) -> None:
+    """The derivation-fitness gate lives inside the instrument, so the
+    read is where the session can name it (§spec:session-gates). Without
+    the name a consumer sees only that something refused."""
+    out = tmp_path / "unfit.yaml"
+    stream: list[SessionEvent] = []
+    with MockBMDDeckLink(0) as device, pytest.raises(DerivationRefused):
+        device._max_frame_history = len(protocol_patches())
+        wall = PlausibleWall(device)
+        characterize(
+            device=device,
+            instrument=HybridInstrument(wall, UnfitColorimeter(wall)),
+            out_path=out,
+            clock=fixed_clock,
+            settle_seconds=0.0,
+            reading=normalized_reading(),
+            emit=stream.append,
+        )
+    refusals = [
+        event
+        for event in of_type(tuple(stream), GateEvaluated)
+        if event.verdict == GateVerdict.REFUSED
+    ]
+    assert [event.gate for event in refusals] == [Gate.DERIVATION_FITNESS]
+    assert of_type(tuple(stream), SessionEnded)[0].outcome == Outcome.REFUSED
+    assert not out.exists(), "a refused session writes no artifact"
