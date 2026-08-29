@@ -1,8 +1,11 @@
 """CLI surface tests: the entry point exists and drives a doubles session."""
 
+import os
 import re
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -171,3 +174,57 @@ def test_characterize_refuses_naive_timestamp(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "timezone" in result.output
+
+
+def test_an_interrupt_cancels_the_run_and_writes_no_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: SIGINT reaches the handler, the session reads the
+    flag between patches, and the run leaves nothing behind
+    (§spec:session-events).
+
+    The interrupt is fired from inside the settle of the third patch —
+    deterministic, where racing a real Ctrl-C against a sub-second
+    doubles run would not be.
+    """
+    settles = 0
+
+    def interrupt_on_third(seconds: float) -> None:
+        nonlocal settles
+        settles += 1
+        if settles == 3:
+            os.kill(os.getpid(), signal.SIGINT)
+
+    # `display_measure.session` sleeps through the stdlib module, so
+    # this is the settle it is about to take. monkeypatch restores it.
+    monkeypatch.setattr(time, "sleep", interrupt_on_third)
+    out = tmp_path / "cancelled.yaml"
+    result = runner.invoke(
+        app,
+        ["characterize", "--out", str(out), "--settle", "0"],
+    )
+    assert result.exit_code == 130, result.output
+    assert not out.exists(), "a cancelled session writes no artifact"
+
+
+def test_the_interrupt_handler_is_removed_when_the_run_ends(
+    wall_artifact: Path, tmp_path: Path
+) -> None:
+    """The CLI borrows SIGINT for the session and gives it back. Leaving
+    a swallowing handler installed would make the next Ctrl-C — at a
+    prompt, in a shell pipeline — do nothing visible."""
+    before = signal.getsignal(signal.SIGINT)
+    result = runner.invoke(
+        app,
+        [
+            "characterize",
+            "--out",
+            str(tmp_path / "m.yaml"),
+            "--settle",
+            "0",
+            "--timestamp",
+            FIXED_TIMESTAMP,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert signal.getsignal(signal.SIGINT) is before

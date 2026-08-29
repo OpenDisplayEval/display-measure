@@ -5,15 +5,29 @@ with the walking skeleton; `verify` and `snapshot` register here when
 their workstreams ship — no placeholder commands before then.
 `--instrument` chooses what measures: the doubles by default, so a
 laptop run and CI need no hardware at all.
+
+The session log this command prints is a consumer of the session's
+event stream, not a second reporting path (§spec:session-events); the
+core defaults its sink to the renderer, so this file wires no logging
+of its own beyond the handler. Ctrl-C is the CLI's cancel source.
 """
 
 import logging
+import signal
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from types import FrameType
 
 import typer
+
+# Not deferred: `display_measure.events` is stdlib-only by design, so
+# the lifecycle contract costs `--help` nothing (§spec:session-events).
+from display_measure.events import Cancelled, SessionCancelled
 
 app = typer.Typer(
     name="display-measure",
@@ -22,6 +36,10 @@ app = typer.Typer(
 )
 
 DEFAULT_SETTLE_SECONDS = 0.5
+# 128 + SIGINT, the shell convention for a process the operator
+# interrupted. Distinct from the refusal code, because a cancelled
+# session found nothing wrong with the rig.
+CANCELLED_EXIT_CODE = 130
 # Restated rather than imported: `display_measure.hybrid` pulls numpy,
 # which no `--help` or argument error should pay for. The deferred
 # import below asserts the two agree.
@@ -52,6 +70,38 @@ def main() -> None:
         format="%(message)s",
         stream=sys.stderr,
     )
+
+
+@contextmanager
+def _cancel_on_interrupt() -> Iterator[Cancelled]:
+    """Ctrl-C asks the session to stop; it stops after the current patch.
+
+    A session holds a DeckLink and an instrument mid-conversation, and
+    the gap between patches is the only place it can stop without
+    leaving a driven frame unread (§spec:session-events). So the first
+    interrupt only raises a flag the session reads there.
+
+    The default handler goes back in behind it, so a second Ctrl-C
+    kills the process outright — the escape hatch an instrument read
+    that never returns needs, and the reason this does not simply
+    swallow SIGINT for the run.
+    """
+    stop = threading.Event()
+
+    def interrupted(_signum: int, _frame: FrameType | None) -> None:
+        stop.set()
+        signal.signal(signal.SIGINT, previous)
+        typer.echo(
+            "Cancelling: stopping after the current patch. "
+            "Interrupt again to abort now.",
+            err=True,
+        )
+
+    previous = signal.signal(signal.SIGINT, interrupted)
+    try:
+        yield stop.is_set
+    finally:
+        signal.signal(signal.SIGINT, previous)
 
 
 def _parse_timestamp(value: str) -> datetime:
@@ -132,7 +182,11 @@ def characterize(
         ),
     ),
 ) -> None:
-    """Characterize a wall: drive the patch protocol, measure, emit the artifact."""
+    """Characterize a wall: drive the patch protocol, measure, emit the artifact.
+
+    Ctrl-C cancels: the session stops after the patch it is on, leaves
+    the wall dark, and writes no artifact.
+    """
     # Deferred so `--help` needs no measurement stack loaded.
     from display_measure import session
     from display_measure.artifact import DECLARED_CONTRACT
@@ -176,27 +230,33 @@ def characterize(
             raise typer.Exit(2)
 
     try:
-        if doubled:
-            session.doubles_session(
-                out,
-                clock=clock,
-                settle_seconds=settle,
-                hybrid=hybrid,
-                luminance_threshold=threshold,
-            )
-        else:
-            session.hardware_session(
-                out,
-                clock=clock,
-                settle_seconds=settle,
-                hybrid=hybrid,
-                luminance_threshold=threshold,
-                processor_host=processor,
-                declared=declared,
-            )
+        with _cancel_on_interrupt() as cancelled:
+            if doubled:
+                session.doubles_session(
+                    out,
+                    clock=clock,
+                    settle_seconds=settle,
+                    hybrid=hybrid,
+                    luminance_threshold=threshold,
+                    cancelled=cancelled,
+                )
+            else:
+                session.hardware_session(
+                    out,
+                    clock=clock,
+                    settle_seconds=settle,
+                    hybrid=hybrid,
+                    luminance_threshold=threshold,
+                    processor_host=processor,
+                    declared=declared,
+                    cancelled=cancelled,
+                )
     except FileExistsError as e:
         typer.echo(f"Error: {e} — measurements artifacts are immutable", err=True)
         raise typer.Exit(1) from e
     except (ContractViolation, DerivationRefused) as e:
         typer.echo(f"Refused: {e}", err=True)
         raise typer.Exit(2) from e
+    except SessionCancelled as e:
+        typer.echo(f"Cancelled: {e}", err=True)
+        raise typer.Exit(CANCELLED_EXIT_CODE) from e
