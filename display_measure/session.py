@@ -169,8 +169,10 @@ def _frame(encoding: WireEncoding, patch: Patch) -> npt.NDArray[np.uint16]:
     point of it (§spec:measure-sessions), so they go to the wire
     untouched.
     """
-    codes = patch.wire_codes if patch.wire_codes is not None else encode_pixel(
-        encoding, patch.rgb
+    codes = (
+        patch.wire_codes
+        if patch.wire_codes is not None
+        else encode_pixel(encoding, patch.rgb)
     )
     return np.full((FRAME_HEIGHT, FRAME_WIDTH, 3), codes, dtype=np.uint16)
 
