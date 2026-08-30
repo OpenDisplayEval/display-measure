@@ -13,8 +13,11 @@ shuffle, or reordering what leads, is.
 
 ## Patch inventory
 
-72 patches, device-referred raw code values at the declared wire
-format (12-bit RGB, full drive 4095), no OCIO in the loop:
+72 patches, device-referred 12-bit RGB code values (full drive 4095),
+no OCIO in the loop. The codes are the protocol's whatever link carries
+them; the wire encoding is a session parameter (see Session
+parameters), and a link that cannot carry every code records which it
+did:
 
 | Group | Patches | Fills |
 | --- | --- | --- |
@@ -120,6 +123,11 @@ the protocol again.
   against the built-in recommended contract, which is unlikely to match
   a given rig; without `--processor` a hardware session refuses
   outright. The doubles declare compliance and need neither.
+- Wire encoding: `--wire` declares the link the patches ride to the
+  device (`rgb12`, the bench link and the default; `v210`). The gate
+  holds the processor's input metadata to the declaration
+  (§spec:session-gates), and the artifact records the declaration and
+  the codes the wire carried per patch (§spec:measurements-artifact).
 - Instrument: `--instrument` selects it. CR-300 class for
   characterization-grade sessions; a bare colorimeter is drift-check
   grade only. A hybrid session keeps characterization grade while
@@ -138,3 +146,12 @@ the protocol again.
   cd/m². A hybrid session also reads the colorimeter on every patch:
   the threshold is stated in measured luminance, and the fast
   instrument is the one that can measure it cheaply.
+
+## Artifact schema
+
+`color-wrangler/measurements/2` (§spec:measurements-artifact). Schema 2
+adds the `wire_encoding` block — the declaration, and `wire_codes`, the
+codes the wire carried per driven patch — and changes nothing else, so
+a schema-1 artifact reads as schema 2 over `rgb12`. A loader given
+artifacts whose blocks differ shall refuse to compare them as one
+measurement.

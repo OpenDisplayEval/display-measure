@@ -33,8 +33,11 @@ from pathlib import Path
 # was named in: the artifact writer moved to display-measure, and this
 # string did not follow it. Every promoted artifact carries it, and
 # downstream loaders dispatch on it — renaming it breaks the provenance
-# of every artifact already promoted.
-SCHEMA = "color-wrangler/measurements/1"
+# of every artifact already promoted. It changes only when the format
+# changes: 2 added `wire_encoding`, so a loader can tell two artifacts
+# of one display over different links apart; a schema-1 artifact
+# implied the bench's 12-bit RGB link.
+SCHEMA = "color-wrangler/measurements/2"
 
 # Nine decimals sits below any instrument's repeatability while keeping
 # the rendered bytes independent of Python's float repr.
@@ -196,6 +199,62 @@ DECLARED_CONTRACT = ProcessorStateSnapshot(
 )
 
 
+# What the artifact names a link's samples: RGB, or luma and chroma. A
+# session's protocol codes are RGB either way (§spec:patch-protocol); the
+# sampling says what the device received.
+from display_measure.protocol import CODE_BITS  # noqa: E402
+
+SAMPLING_RGB = "rgb"
+SAMPLING_YCBCR = "ycbcr"
+
+
+@dataclass(frozen=True)
+class WireEncoding:
+    """The encoding between a patch and the device (§spec:measure-sessions).
+
+    A patch is what the processor receives; this is how it got there.
+    Declared by the session, held against the processor's input metadata
+    by the wire-format gate, and recorded so two artifacts of one display
+    over different links read as different measurements. `layout` is the
+    pypixelpack layout name; `legal_codes` names the inclusive code span
+    each component can carry, because a narrow-range encoding cannot
+    represent every RGB code the protocol drives.
+    """
+
+    layout: str
+    bit_depth: int
+    sampling: str
+    subsampling: str
+    levels: str
+    matrix: str
+    legal_codes: tuple[tuple[str, int, int], ...]
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("layout", self.layout),
+            ("sampling", self.sampling),
+            ("subsampling", self.subsampling),
+            ("levels", self.levels),
+            ("matrix", self.matrix),
+            *((f"legal_codes[{c}]", c) for c, _, _ in self.legal_codes),
+        ):
+            _renderable(value, name)
+        if self.sampling not in (SAMPLING_RGB, SAMPLING_YCBCR):
+            raise ValueError(
+                f"sampling is {SAMPLING_RGB!r} or {SAMPLING_YCBCR!r}, "
+                f"got {self.sampling!r}"
+            )
+
+    @property
+    def identity(self) -> bool:
+        """The frame is the protocol's RGB codes, untouched.
+
+        Computed, not inferred from sampling alone: a 10-bit RGB link is
+        RGB-sampled and still not the identity.
+        """
+        return self.sampling == SAMPLING_RGB and self.bit_depth == CODE_BITS
+
+
 @dataclass(frozen=True)
 class ResponsePoint:
     """One ramp reading: the driven code and the measured absolute XYZ."""
@@ -285,6 +344,7 @@ class MeasurementsArtifact:
     processor_state: ProcessorStateSnapshot
     session_start: datetime
     session_end: datetime
+    wire_encoding: WireEncoding
     protocol_name: str | None = None
     presentation_order: tuple[str, ...] | None = None
     per_channel_response: PerChannelResponse | None = None
@@ -298,6 +358,11 @@ class MeasurementsArtifact:
     # reproduction runs render zeros and stay byte-deterministic.
     # Workflow telemetry for driving session time down, not colorimetry.
     patch_seconds: tuple[float, ...] | None = None
+    # The codes the wire carried for each driven patch, presentation
+    # order: what the device received, as a fact of the session. Whether
+    # a protocol code survived the link is derivable from these and the
+    # encoding; the artifact records only what happened.
+    wire_codes: tuple[tuple[int, int, int], ...] | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -314,6 +379,7 @@ class MeasurementsArtifact:
         routing = self.instrument_routing
         for field, values in (
             ("patch_seconds", self.patch_seconds),
+            ("wire_codes", self.wire_codes),
             ("sources", None if routing is None else routing.sources),
         ):
             if values is not None and (
@@ -372,6 +438,33 @@ def _routing_lines(routing: InstrumentRouting) -> list[str]:
         f"  sources: [{sources}]",
         "",
     ]
+
+
+def _encoding_lines(
+    encoding: WireEncoding,
+    wire_codes: tuple[tuple[int, int, int], ...] | None,
+) -> list[str]:
+    lines = [
+        "# The link the patches rode to the device (§spec:measurements-artifact).",
+        "wire_encoding:",
+        f'  layout: "{encoding.layout}"',
+        f"  bit_depth: {encoding.bit_depth}",
+        f'  sampling: "{encoding.sampling}"',
+        f'  subsampling: "{encoding.subsampling}"',
+        f'  levels: "{encoding.levels}"',
+        f'  matrix: "{encoding.matrix}"',
+        "  # The inclusive code span the link carries, per component.",
+        "  legal_codes:",
+        *(f"    {name}: [{lo}, {hi}]" for name, lo, hi in encoding.legal_codes),
+    ]
+    if wire_codes is not None:
+        lines += [
+            "  # The codes the wire carried per driven patch, in the same order",
+            "  # as presentation_order.",
+            "  wire_codes:",
+            *(f"    - [{a}, {b}, {c}]" for a, b, c in wire_codes),
+        ]
+    return [*lines, ""]
 
 
 def _response_lines(points: tuple[ResponsePoint, ...], indent: str) -> list[str]:
@@ -447,6 +540,7 @@ def render(artifact: MeasurementsArtifact) -> str:
             for feature in PROCESSING_FEATURES
         ],
         "",
+        *_encoding_lines(artifact.wire_encoding, artifact.wire_codes),
     ]
     if artifact.protocol_name is not None and artifact.presentation_order is not None:
         lines += [

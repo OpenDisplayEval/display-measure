@@ -8,18 +8,21 @@ from typing import Any, cast
 import pytest
 import yaml
 from bmd_sg.decklink import EOTFType, MockBMDDeckLink, PixelFormatType
+from test_processor import tree
 
+from display_measure import session
 from display_measure.artifact import DECLARED_CONTRACT
 from display_measure.consistency import InconsistentSession
 from display_measure.hybrid import DERIVATION_PATCHES
-from display_measure.processor import ContractViolation
+from display_measure.processor import ContractViolation, InputMetadata
 from display_measure.protocol import (
     FULL_DRIVE,
     PROTOCOL_NAME,
     presentation_order,
     protocol_patches,
 )
-from display_measure.session import Clock, doubles_session
+from display_measure.session import Clock, doubles_session, hardware_session
+from display_measure.wire import V210, encode_pixel
 
 
 def method_calls(device: MockBMDDeckLink, method: str) -> list[dict[str, Any]]:
@@ -287,3 +290,90 @@ def test_the_level_gate_stops_the_session_at_white(
     ]
     assert len(driven) == 2, driven
     assert "black" in driven[0] and "white" in driven[1]
+
+
+def test_a_v210_session_drives_the_encoded_codes_through_the_yuv_format(
+    v210_run: tuple[Path, MockBMDDeckLink],
+) -> None:
+    """The protocol's 12-bit RGB codes reach the device as the codes the
+    declared encoding puts on the wire — pypixelpack's, not this
+    repository's — and the DeckLink is told to pack them as v210."""
+    _, device = v210_run
+    formats = [call["format"] for call in method_calls(device, "set_pixel_format")]
+    assert formats == [PixelFormatType.FORMAT_10BIT_YUV]
+    frames = device.get_frame_history()
+    expected = presentation_order(protocol_patches(), seed=0)
+    assert len(frames) == len(expected)
+    for frame, patch in zip(frames, expected, strict=True):
+        assert tuple(frame[0, 0]) == encode_pixel(V210, patch.rgb), patch.name
+
+
+def test_a_v210_session_measures_the_display_through_the_link(
+    v210_run: tuple[Path, MockBMDDeckLink], display_artifact: Path
+) -> None:
+    """Full drive survives the narrow range exactly, so the peak agrees;
+    the shadow codes do not, so the ramps are a different measurement."""
+    v210 = yaml.safe_load(v210_run[0].read_text())
+    rgb = yaml.safe_load(display_artifact.read_text())
+    assert v210["luminance"]["peak_luminance"] == rgb["luminance"]["peak_luminance"]
+    assert response_rows(v210) != response_rows(rgb)
+
+
+def test_artifacts_over_different_links_are_legibly_different_measurements(
+    v210_run: tuple[Path, MockBMDDeckLink], display_artifact: Path
+) -> None:
+    """The one field a loader needs to refuse comparing them silently."""
+    v210 = yaml.safe_load(v210_run[0].read_text())
+    rgb = yaml.safe_load(display_artifact.read_text())
+    assert v210["wire_encoding"] != rgb["wire_encoding"]
+    driven = presentation_order(protocol_patches(), seed=0)
+    assert v210["wire_encoding"]["wire_codes"] == [
+        list(encode_pixel(V210, patch.rgb)) for patch in driven
+    ]
+
+
+# --- the hardware path holds the processor to the declared link -----------
+
+
+class BenchProcessor:
+    """A Tessera double reporting the bench: normalized colour, 12-bit RGB in."""
+
+    def __init__(self, host: str, *, sampling: str = "rgb", bit_depth: int = 12):
+        self.host = host
+        self._link = InputMetadata(
+            bit_depth=bit_depth, sampling=sampling, hdr_format="standard-dynamic-range"
+        )
+
+    def global_colour(self) -> dict[str, Any]:
+        return tree(
+            gamma=DECLARED_CONTRACT.gamma_value,
+            **{
+                f: {"enabled": True}
+                for f in ("dark-magic", "puretone", "extended-bit-depth")
+            },
+        )
+
+    def input_metadata(self) -> InputMetadata:
+        return self._link
+
+
+BENCH_CONTRACT = replace(DECLARED_CONTRACT, intensity="1800 nits")
+
+
+def test_a_v210_session_is_refused_by_a_processor_receiving_the_bench_link(
+    fixed_clock: Clock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Declaring v210 over a 12-bit RGB link would bake the processor's
+    own decode into the measurement; the gate refuses ahead of
+    instrument discovery, so the refusal costs a round trip."""
+    monkeypatch.setattr(session, "TesseraProcessor", BenchProcessor)
+    with pytest.raises(ContractViolation) as e:
+        hardware_session(
+            tmp_path / "v210.yaml",
+            clock=fixed_clock,
+            settle_seconds=0.0,
+            processor_host="bench",
+            encoding=V210,
+            declared=BENCH_CONTRACT,
+        )
+    assert "ycbcr" in str(e.value) and "10-bit" in str(e.value)

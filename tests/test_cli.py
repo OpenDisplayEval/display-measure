@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 
 from display_measure import session
 from display_measure.cli import app
+from display_measure.wire import RGB12, V210
 
 runner = CliRunner()
 
@@ -82,6 +83,15 @@ def test_help_lists_every_instrument_mode() -> None:
     assert "--threshold" in output
 
 
+def test_help_lists_every_wire_encoding() -> None:
+    result = runner.invoke(app, ["characterize", "--help"])
+    assert result.exit_code == 0
+    output = " ".join(plain(result.output).split())
+    assert "--wire" in output
+    for name in ("rgb12", "v210"):
+        assert name in output
+
+
 def test_doubles_hybrid_wiring_matches_the_session_core(
     hybrid_artifact: Path, full_ramp_threshold: float, tmp_path: Path
 ) -> None:
@@ -137,6 +147,50 @@ def test_hardware_modes_reach_the_bench_wiring(
     assert len(calls) == 1
     assert calls[0]["hybrid"] is hybrid
     assert calls[0]["luminance_threshold"] == 4.0
+    assert calls[0]["encoding"] is RGB12, "the bench link is the default"
+
+
+def test_the_declared_wire_encoding_reaches_the_bench_wiring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        session,
+        "hardware_session",
+        lambda out_path, **kwargs: calls.append({"out": out_path, **kwargs}),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "characterize",
+            "--out",
+            str(tmp_path / "m.yaml"),
+            "--instrument",
+            "spectro",
+            "--wire",
+            "v210",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls[0]["encoding"] is V210
+
+
+def test_the_doubles_drive_a_v210_session_end_to_end(tmp_path: Path) -> None:
+    out = tmp_path / "v210.yaml"
+    result = runner.invoke(
+        app,
+        ["characterize", "--out", str(out), "--wire", "v210", "--settle", "0"],
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+
+def test_characterize_refuses_an_unknown_wire_encoding(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["characterize", "--out", str(tmp_path / "m.yaml"), "--wire", "r210"],
+    )
+    assert result.exit_code != 0
 
 
 def test_characterize_refuses_an_unknown_instrument(tmp_path: Path) -> None:

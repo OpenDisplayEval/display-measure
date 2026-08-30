@@ -21,8 +21,6 @@ patch set or its codes.
 import hashlib
 from dataclasses import dataclass
 
-from bmd_sg.decklink import PixelFormatType
-
 # A wire identifier, not a package name. It outlived the repository it
 # was named in: the session core moved to display-measure, and this
 # string did not follow it. Every promoted artifact records the protocol
@@ -30,10 +28,11 @@ from bmd_sg.decklink import PixelFormatType
 # renaming it breaks the provenance of every artifact already promoted.
 PROTOCOL_NAME = "color-wrangler/characterize/3"
 
-# The declared 12-bit RGB wire format and its full-drive code value
-# (validated on the bench rig over HDMI, §spec:signal-contract).
-PATCH_PIXEL_FORMAT = PixelFormatType.FORMAT_12BIT_RGB
-FULL_DRIVE = 2**PATCH_PIXEL_FORMAT.bit_depth - 1
+# Protocol codes are 12-bit RGB whatever link carries them; the wire
+# encoding is a session parameter (`display_measure.wire`), and a
+# narrower link records which of these codes it could represent.
+CODE_BITS = 12
+FULL_DRIVE = 2**CODE_BITS - 1
 
 # Ramps start above the codes lost in the black floor; full drive
 # belongs to the anchor patches.

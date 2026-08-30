@@ -22,6 +22,7 @@ from display_measure.artifact import (
     render,
     write,
 )
+from display_measure.wire import RGB12, V210, encode_pixel
 
 
 def sample_artifact() -> MeasurementsArtifact:
@@ -47,6 +48,7 @@ def sample_artifact() -> MeasurementsArtifact:
         ),
         session_start=datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC),
         session_end=datetime(2026, 8, 10, 12, 5, 0, tzinfo=UTC),
+        wire_encoding=RGB12,
     )
 
 
@@ -105,6 +107,7 @@ def test_naive_timestamps_are_refused() -> None:
             processor_state=sample_artifact().processor_state,
             session_start=datetime(2026, 8, 10, 12, 0, 0),
             session_end=datetime(2026, 8, 10, 12, 5, 0, tzinfo=UTC),
+            wire_encoding=RGB12,
         )
 
 
@@ -130,6 +133,7 @@ def full_protocol_artifact() -> MeasurementsArtifact:
         sample_artifact(),
         protocol_name="color-wrangler/characterize/1",
         presentation_order=("black", "gray_0016", "white"),
+        wire_codes=((0, 0, 0), (16, 16, 16), (4095, 4095, 4095)),
         per_channel_response=PerChannelResponse(red=ramp, green=ramp, blue=ramp),
         gray_response=ramp,
         additivity=AdditivityTriad(
@@ -258,8 +262,72 @@ def test_schema_keeps_the_name_it_was_promoted_under() -> None:
     find-replace across the repository would corrupt the provenance of
     measurements already accepted. `PROTOCOL_NAME` is pinned the same
     way in tests/test_protocol.py; this closes the asymmetry.
+
+    Schema 2 added the wire encoding block; a schema-1 artifact implied
+    the bench's 12-bit RGB link.
     """
-    assert SCHEMA == "color-wrangler/measurements/1"
+    assert SCHEMA == "color-wrangler/measurements/2"
+
+
+# --- the wire encoding is recorded -----------------------------------------
+
+
+def test_render_records_the_identity_encoding() -> None:
+    doc = yaml.safe_load(render(full_protocol_artifact()))
+    assert doc["schema"] == SCHEMA
+    encoding = doc["wire_encoding"]
+    assert {k: v for k, v in encoding.items() if k != "wire_codes"} == {
+        "layout": "r12b",
+        "bit_depth": 12,
+        "sampling": "rgb",
+        "subsampling": "444",
+        "levels": "full",
+        "matrix": "identity",
+        "legal_codes": {"rgb": [0, 4095]},
+    }
+    # The identity link carries the protocol codes as driven.
+    assert encoding["wire_codes"] == [[0, 0, 0], [16, 16, 16], [4095] * 3]
+
+
+def v210_artifact() -> MeasurementsArtifact:
+    full = full_protocol_artifact()
+    assert full.presentation_order is not None
+    codes = {"black": (0, 0, 0), "gray_0016": (16, 16, 16), "white": (4095, 4095, 4095)}
+    return replace(
+        full,
+        wire_encoding=V210,
+        wire_codes=tuple(
+            encode_pixel(V210, codes[name]) for name in full.presentation_order
+        ),
+    )
+
+
+def test_render_records_what_the_wire_carried() -> None:
+    """Gray 16 rode the link as luma 67: the artifact says what the device
+    received, in presentation order beside the patch names."""
+    doc = yaml.safe_load(render(v210_artifact()))
+    encoding = doc["wire_encoding"]
+    assert (encoding["layout"], encoding["bit_depth"]) == ("v210", 10)
+    assert (encoding["sampling"], encoding["subsampling"]) == ("ycbcr", "422")
+    assert (encoding["levels"], encoding["matrix"]) == ("narrow", "bt709")
+    assert encoding["legal_codes"] == {"luma": [64, 940], "chroma": [64, 960]}
+    assert encoding["wire_codes"] == [[64, 512, 512], [67, 512, 512], [940, 512, 512]]
+    assert render(v210_artifact()) == render(v210_artifact())
+
+
+def test_wire_codes_parallel_the_presentation_order() -> None:
+    with pytest.raises(ValueError, match="wire_codes"):
+        replace(v210_artifact(), wire_codes=((0, 0, 0),))
+
+
+def test_artifacts_over_two_links_differ_only_in_the_encoding_block() -> None:
+    """Strip the block from an artifact over either link and the same
+    measurement remains."""
+    rgb = yaml.safe_load(render(full_protocol_artifact()))
+    v210 = yaml.safe_load(render(v210_artifact()))
+    assert rgb["wire_encoding"] != v210["wire_encoding"]
+    del rgb["wire_encoding"], v210["wire_encoding"]
+    assert rgb == v210
 
 
 # --- operator strings cannot corrupt the record ---------------------------
