@@ -43,9 +43,17 @@ Not owned here: OCIO semantics and config generation (ocio-display-gen),
 and the promotion decision (color-wrangler). Device layers are
 referenced, never re-specified: bmd-signal-gen owns patch rendering and
 wire-format correctness, pydecklink owns device access, colour-specio
-owns instrument communication. colour-specio is pinned to a PyPI
-release and never forked; its `measure()` surface is the driver
-contract, and upstream is the venue for fixes.
+owns instrument communication; its `measure()` surface is the driver
+contract.
+
+colour-specio is a fork of `colour-science/colour-specio`, org-owned
+and tracking upstream, carrying device support upstream does not have
+yet. Upstream stays the venue for fixes and the fork's delta stays
+small enough to send there; the fork is the pin until a fix merges.
+The seam file's format is colour-specio's too
+(`§spec:measurement-seam`), so a gap in its measurement file reader is
+a gap in this layer's output — fixed upstream, not worked around
+here.
 
 ## Measurement sessions §spec:measure-sessions
 
@@ -254,7 +262,7 @@ varies per session and the artifact records it in full.
 
 ## Measurements artifact §spec:measurements-artifact
 
-*Status: in progress*
+*Status: complete*
 
 The session's output is one file: machine-written, immutable, never
 hand-edited (`§spec:artifact-chain`). It carries the measured
@@ -295,3 +303,37 @@ downstream loaders dispatch on them, so renaming either breaks the
 provenance of every artifact already promoted. They change only when
 the format they name changes: schema 2 added the wire encoding block,
 and a schema-1 artifact implied the bench's 12-bit RGB link.
+
+**The artifact is the seam file** (`§spec:measurement-seam`). It is
+CSMF, carrying the spectra behind each reading and its per-row
+spectral provenance, with everything above — contract, panel state,
+protocol name, instrument identity, hashes — in the provenance block
+CSMF's reserved ancillary field holds. One file: CSMF replaces the
+YAML rendering rather than joining it, because a pipeline with two
+measurements files of record has none.
+
+**Determinism survives the format change through the projection, not
+the bytes.** Byte-determinism was a property of the YAML rendering,
+and protobuf guarantees round-trip rather than canonical encoding — a
+digest over raw file bytes would rotate on a dependency upgrade. The
+digest therefore covers the same canonical rendering as before, now
+computed from the parsed values instead of written to disk: fixed key
+order, nine-decimal floats, LF, UTF-8. The renderer is retained and
+repurposed; the artifact stays self-verifying, and a re-serialized
+file with identical content still verifies. The projection carries
+each row's spectrum as a digest rather than as samples: an
+instrument's grid is hundreds of bins per row, and restating every one
+would multiply the file's size for data it already holds.
+
+**Spectral provenance is per row** (`§spec:spectral-retention`). Each
+row records whether its spectrum was measured, reconstructed or
+absent, so an analysis needing a real spectrum refuses the rows that
+lack one instead of treating a scaled estimate as a measurement. A
+colorimeter-routed row carries the bright-regime reading of the same
+stimulus scaled to the luminance it measured, and names the luminance
+span the scaling reached across. Its tristimulus stays the one the
+disciplined colorimeter measured: a reconstruction carries its
+anchor's chromaticity by construction, and letting it overwrite the
+measured value would launder an estimate into a measurement. Black
+stays absent — it is panel leakage plus reflected ambient, not a
+dimmer white, so no measured row stands in for it.
