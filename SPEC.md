@@ -125,6 +125,17 @@ channel. The matrix is therefore part of the declaration, recorded in
 the artifact, and a consumer comparing two artifacts compares what each
 one states rather than assuming they match.
 
+**The protocol's floor is not the display's.** The lowest ramp rungs can
+sit below what the instrument can resolve, and a session that drives
+them measures noise. Measured on the bench: ramp code 16 reads 0.0175
+cd/m² and code 24 reads 0.0242, a step of 0.0067 against a single-read
+repeatability of 0.0021 — and the spectroradiometer refuses the same
+patch outright at its slow exposure, answering "light intensity too low
+or unmeasurable". The self-consistency gate catches the consequence
+after the fact; the rungs a given instrument cannot resolve are a
+property of the pairing, not of the link, and both wires fail at the
+same rung.
+
 **Instruments have doubles.** The default double is a deterministic
 plausible display — an additive per-channel model that synthesizes the
 reading for the frame being driven — so the hardware-free
