@@ -22,7 +22,7 @@ from display_measure.protocol import (
     protocol_patches,
 )
 from display_measure.session import Clock, doubles_session
-from display_measure.wire import V210, encode_pixel
+from display_measure.wire import RGB12, V210, encode_pixel
 
 
 def method_calls(device: MockBMDDeckLink, method: str) -> list[dict[str, Any]]:
@@ -399,3 +399,47 @@ def test_a_link_the_processor_cannot_report_is_announced_not_refused(
     session.audit_wire_when_driving("bench", V210, seen.append)
     assert len(seen) == 1
     assert seen[0].fields == ("bit depth", "sampling", "hdr signalling")  # type: ignore[attr-defined]
+
+
+def test_the_wire_gate_waits_for_the_processor_to_relock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A processor mid-relock is still showing the last format it had.
+
+    Refusing on the first reading fails a valid session for a link that
+    had not caught up yet — which is what a fixed two-second wait did on
+    the bench when the device went from v210 back to 12-bit RGB.
+    """
+    readings = iter(
+        [
+            InputMetadata(bit_depth=10, sampling="ycbcr", hdr_format="sdr"),
+            InputMetadata(bit_depth=10, sampling="ycbcr", hdr_format="sdr"),
+            InputMetadata(
+                bit_depth=12, sampling="rgb", hdr_format="standard-dynamic-range"
+            ),
+        ]
+    )
+
+    class Relocking(BenchProcessor):
+        def input_metadata(self) -> InputMetadata:
+            return next(readings)
+
+    monkeypatch.setattr(session, "TesseraProcessor", Relocking)
+    monkeypatch.setattr(session, "WIRE_RELOCK_POLL_SECONDS", 0.0)
+    session.audit_wire_when_driving("bench", RGB12)
+
+
+def test_a_link_that_never_relocks_is_still_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The deadline is what makes the poll a gate rather than a wait."""
+
+    class Stuck(BenchProcessor):
+        def input_metadata(self) -> InputMetadata:
+            return InputMetadata(bit_depth=10, sampling="ycbcr", hdr_format="sdr")
+
+    monkeypatch.setattr(session, "TesseraProcessor", Stuck)
+    monkeypatch.setattr(session, "WIRE_RELOCK_SECONDS", 0.0)
+    monkeypatch.setattr(session, "WIRE_RELOCK_POLL_SECONDS", 0.0)
+    with pytest.raises(ContractViolation):
+        session.audit_wire_when_driving("bench", RGB12)

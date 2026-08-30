@@ -848,9 +848,13 @@ def _audit_processor(
 
 
 # How long the processor is given to lock to a format the session has just
-# started driving. Measured on the bench: an S8 republishes its input
-# metadata within about a second of a format change.
-WIRE_RELOCK_SECONDS = 2.0
+# started driving, and how often it is asked. A fixed two-second wait was
+# not enough on the bench: switching the device from v210 back to 12-bit
+# RGB, the S8 went on publishing the previous format past the deadline
+# and a valid session was refused for it. The link is polled instead, and
+# only the last reading before the deadline is judged.
+WIRE_RELOCK_SECONDS = 20.0
+WIRE_RELOCK_POLL_SECONDS = 1.0
 
 
 def audit_wire_when_driving(
@@ -871,11 +875,21 @@ def audit_wire_when_driving(
     which is the right trade: the alternative is a gate whose verdict
     depends on run order.
     """
-    time.sleep(WIRE_RELOCK_SECONDS)
     processor = TesseraProcessor(processor_host)
-    unverified = audit_wire_format(
-        WireFormat.for_encoding(encoding), processor.input_metadata()
-    )
+    declared = WireFormat.for_encoding(encoding)
+    deadline = time.monotonic() + WIRE_RELOCK_SECONDS
+    while True:
+        live = processor.input_metadata()
+        try:
+            unverified = audit_wire_format(declared, live)
+        except ContractViolation:
+            # Still showing the format it was receiving a moment ago.
+            # Only the reading that outlasts the deadline is a verdict.
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(WIRE_RELOCK_POLL_SECONDS)
+            continue
+        break
     if unverified:
         # Said out loud, every session, because the alternative is an
         # operator reading a green gate and believing the link was

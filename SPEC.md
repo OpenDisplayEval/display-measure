@@ -88,11 +88,15 @@ session says which ones went unchecked. A gate that passes because
 nobody contradicted it is not the same as one that passes because the
 processor agreed.
 
-**The gate runs while the session is driving.** A processor reports the
-format it is receiving, so asking before playback starts compares the
-declaration against whatever last drove the link. The gate runs after
-the drive is up, at the cost of a refusal arriving with the rig already
-open — cheaper than a verdict that depends on what ran previously.
+**The gate runs while the session is driving, and waits for the link to
+catch up.** A processor reports the format it is receiving, so asking
+before playback starts compares the declaration against whatever last
+drove the link — and playback alone is not enough, since between
+starting it and the first frame there are none to report. The session
+declares the format, drives black, then polls the processor until it
+agrees or a deadline passes. Only the reading that outlasts the deadline
+is a verdict. The cost is a refusal arriving with the rig already open,
+which is cheaper than a verdict that depends on what ran previously.
 
 **The range probe is a gate, driven before the protocol.** Its verdict
 conditions every reading after it, so it runs first: a processor
