@@ -48,7 +48,7 @@ PATCH_RGB = {patch.name: patch.rgb for patch in protocol_patches()}
 
 
 def rig(
-    device: MockBMDDeckLink, threshold: float, order: tuple[str, ...]
+    device: MockBMDDeckLink, threshold: float
 ) -> tuple[HybridInstrument, PlausibleDisplay]:
     display = PlausibleDisplay(device)
     hybrid = HybridInstrument(
@@ -90,7 +90,7 @@ def test_correction_recovers_the_spectroradiometer_on_held_out_patches(
     derivation set, routed to the colorimeter, land on the
     spectroradiometer's values."""
     order = (*DERIVATION_PATCHES, "white", "gray_1024", "gray_0016")
-    hybrid, display = rig(device, ALL_COLORIMETER, order)
+    hybrid, display = rig(device, ALL_COLORIMETER)
     readings = run(device, hybrid, order)
     for name in ("white", "gray_1024", "gray_0016"):
         drive(device, PATCH_RGB[name])
@@ -101,7 +101,7 @@ def test_a_low_threshold_routes_every_patch_to_the_spectroradiometer(
     device: MockBMDDeckLink,
 ) -> None:
     order = (*DERIVATION_PATCHES, "white", "gray_0016")
-    hybrid, _ = rig(device, ALL_SPECTRO, order)
+    hybrid, _ = rig(device, ALL_SPECTRO)
     run(device, hybrid, order)
     assert hybrid.routing().sources == (SOURCE_SPECTRORADIOMETER,) * len(order)
 
@@ -110,7 +110,7 @@ def test_routing_attributes_every_read_and_names_both_instruments(
     device: MockBMDDeckLink,
 ) -> None:
     order = (*DERIVATION_PATCHES, "white", "gray_0016")
-    hybrid, _ = rig(device, ALL_COLORIMETER, order)
+    hybrid, _ = rig(device, ALL_COLORIMETER)
     run(device, hybrid, order)
     routing = hybrid.routing()
     assert routing.sources == (
@@ -135,7 +135,7 @@ def test_the_threshold_splits_the_ramp_by_measured_luminance(
     """Bright patches spend the spectroradiometer's exposure; dark ones
     — the expensive ones — do not."""
     order = (*DERIVATION_PATCHES, "white", "gray_0016")
-    hybrid, _ = rig(device, 1.0, order)
+    hybrid, _ = rig(device, 1.0)
     run(device, hybrid, order)
     assert hybrid.routing().sources[-2:] == (
         SOURCE_SPECTRORADIOMETER,
@@ -144,7 +144,7 @@ def test_the_threshold_splits_the_ramp_by_measured_luminance(
 
 
 def test_serial_number_names_both_instruments(device: MockBMDDeckLink) -> None:
-    hybrid, _ = rig(device, ALL_COLORIMETER, DERIVATION_PATCHES)
+    hybrid, _ = rig(device, ALL_COLORIMETER)
     assert "filter-mismatch-1" in hybrid.serial_number
     assert "ftg_stage1_20240115" in hybrid.serial_number
 
@@ -153,7 +153,7 @@ def test_routing_refuses_before_the_correction_is_derived(
     device: MockBMDDeckLink,
 ) -> None:
     order = ("red", "green")
-    hybrid, _ = rig(device, ALL_COLORIMETER, order)
+    hybrid, _ = rig(device, ALL_COLORIMETER)
     run(device, hybrid, order)
     with pytest.raises(RuntimeError, match="derived"):
         hybrid.routing()
