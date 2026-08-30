@@ -9,17 +9,18 @@ import pytest
 import yaml
 from bmd_sg.decklink import EOTFType, MockBMDDeckLink, PixelFormatType
 
+from display_measure import session
 from display_measure.artifact import DECLARED_CONTRACT, SCHEMA
 from display_measure.consistency import InconsistentSession
 from display_measure.hybrid import DERIVATION_PATCHES
-from display_measure.processor import ContractViolation
+from display_measure.processor import ContractViolation, InputMetadata
 from display_measure.protocol import (
     FULL_DRIVE,
     PROTOCOL_NAME,
     presentation_order,
     protocol_patches,
 )
-from display_measure.session import Clock, doubles_session
+from display_measure.session import Clock, doubles_session, hardware_session
 from display_measure.wire import V210, encode_pixel, representable
 
 
@@ -339,3 +340,83 @@ def test_artifacts_over_different_links_are_legibly_different_measurements(
     assert v210["wire_encoding"]["representable_codes"] == [
         list(representable(V210, patch.rgb)) for patch in driven
     ]
+
+
+# --- the hardware path holds the processor to the declared link -----------
+
+
+class Discovered(Exception):
+    """Raised by the instrument stub: the audit passed and discovery began."""
+
+
+class BenchProcessor:
+    """A Tessera double reporting the bench: normalized colour, 12-bit RGB in."""
+
+    def __init__(self, host: str, *, sampling: str = "rgb", bit_depth: int = 12):
+        self.host = host
+        self._link = InputMetadata(
+            bit_depth=bit_depth, sampling=sampling, hdr_format="standard-dynamic-range"
+        )
+
+    def global_colour(self) -> dict[str, Any]:
+        return {
+            "brightness": 1800,
+            "gamma": DECLARED_CONTRACT.gamma_value,
+            "dark-magic": {"enabled": True},
+            "puretone": {"enabled": True},
+            "extended-bit-depth": {"enabled": True},
+            "overdrive": {"enabled": False},
+        }
+
+    def input_metadata(self) -> InputMetadata:
+        return self._link
+
+
+BENCH_CONTRACT = replace(DECLARED_CONTRACT, intensity="1800 nits")
+
+
+def test_a_v210_session_is_refused_by_a_processor_receiving_the_bench_link(
+    fixed_clock: Clock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Declaring v210 over a 12-bit RGB link would bake the processor's
+    own decode into the measurement; the gate refuses ahead of
+    instrument discovery, so the refusal costs a round trip."""
+    monkeypatch.setattr(session, "TesseraProcessor", BenchProcessor)
+    with pytest.raises(ContractViolation) as e:
+        hardware_session(
+            tmp_path / "v210.yaml",
+            clock=fixed_clock,
+            settle_seconds=0.0,
+            processor_host="bench",
+            encoding=V210,
+            declared=BENCH_CONTRACT,
+        )
+    assert "ycbcr" in str(e.value) and "10-bit" in str(e.value)
+
+
+def test_a_v210_session_passes_the_gate_when_the_processor_sees_10bit_ycbcr(
+    fixed_clock: Clock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import specio.spectrometers
+
+    monkeypatch.setattr(
+        session,
+        "TesseraProcessor",
+        lambda host: BenchProcessor(host, sampling="ycbcr", bit_depth=10),
+    )
+
+    class Stub:
+        @staticmethod
+        def discover() -> None:
+            raise Discovered
+
+    monkeypatch.setattr(specio.spectrometers, "CRSpectrometer", Stub)
+    with pytest.raises(Discovered):
+        hardware_session(
+            tmp_path / "v210.yaml",
+            clock=fixed_clock,
+            settle_seconds=0.0,
+            processor_host="bench",
+            encoding=V210,
+            declared=BENCH_CONTRACT,
+        )
