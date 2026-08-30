@@ -86,9 +86,7 @@ class WireFormat:
     hdr_format: str
 
     @classmethod
-    def for_encoding(
-        cls, encoding: WireEncoding, hdr_format: str = SDR_HDR_FORMAT
-    ) -> WireFormat:
+    def for_encoding(cls, encoding: WireEncoding) -> WireFormat:
         """What the processor should see for a declared encoding.
 
         Derived, so the declaration cannot drift from the drive: a v210
@@ -98,7 +96,7 @@ class WireFormat:
         return cls(
             bit_depth=encoding.bit_depth,
             sampling=encoding.sampling,
-            hdr_format=hdr_format,
+            hdr_format=SDR_HDR_FORMAT,
         )
 
 

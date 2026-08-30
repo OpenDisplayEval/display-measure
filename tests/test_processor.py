@@ -24,6 +24,7 @@ from display_measure.processor import (
     contract_from_manifest,
     state_from_tessera,
 )
+from display_measure.wire import RGB12, V210
 
 # The bench contract the show manifest declares (§spec:signal-contract).
 DECLARED = ProcessorStateSnapshot(
@@ -44,9 +45,7 @@ NORMALIZED_TREE = {
     "overdrive": {"enabled": False},
 }
 
-DECLARED_WIRE = WireFormat(
-    bit_depth=12, sampling="rgb", hdr_format="standard-dynamic-range"
-)
+DECLARED_WIRE = WireFormat.for_encoding(RGB12)
 
 
 def tree(**overrides: object) -> dict[str, Any]:
@@ -128,8 +127,6 @@ def test_input_metadata_matching_the_wire_format_passes() -> None:
 def test_a_v210_declaration_is_refused_unless_the_processor_sees_10bit_ycbcr() -> None:
     """The bench link is 12-bit RGB; a session declaring v210 over it
     would bake the processor's own decode into the measurement."""
-    from display_measure.wire import V210
-
     declared = WireFormat.for_encoding(V210)
     bench = InputMetadata(
         bit_depth=12, sampling="rgb", hdr_format="standard-dynamic-range"

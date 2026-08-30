@@ -124,18 +124,10 @@ the protocol again.
   a given rig; without `--processor` a hardware session refuses
   outright. The doubles declare compliance and need neither.
 - Wire encoding: `--wire` declares the link the patches ride to the
-  device — `rgb12` (12-bit RGB identity, the bench HDMI link; default)
-  or `v210` (10-bit BT.709 narrow-range 4:2:2 YCbCr). The session
-  encodes through pypixelpack and implements no conversion; the
-  format-confirmation gate holds the processor's input metadata to the
-  declaration (§spec:session-gates). The artifact records the
-  declaration as `wire_encoding` — layout, bit depth, sampling, levels,
-  matrix and the `legal_codes` each component can carry — and, for a
-  link that cannot carry every 12-bit code, `representable_codes`: the
-  code each patch reached the device as, in presentation order. Gray
-  16 rides v210 as luma 67 and decodes to 14; the artifact says 14.
-  Two artifacts of one display over different links are different
-  measurements.
+  device (`rgb12`, the bench link and the default; `v210`). The gate
+  holds the processor's input metadata to the declaration
+  (§spec:session-gates), and the artifact records the declaration and
+  the codes the wire carried per patch (§spec:measurements-artifact).
 - Instrument: `--instrument` selects it. CR-300 class for
   characterization-grade sessions; a bare colorimeter is drift-check
   grade only. A hybrid session keeps characterization grade while
@@ -157,9 +149,9 @@ the protocol again.
 
 ## Artifact schema
 
-`color-wrangler/measurements/2` (§spec:measurements-artifact). Schema 1
-carried no wire encoding: every artifact implied the bench's 12-bit RGB
-link. Schema 2 adds the `wire_encoding` block and changes nothing else,
-so a schema-1 artifact reads as schema 2 over `rgb12`. A loader given
+`color-wrangler/measurements/2` (§spec:measurements-artifact). Schema 2
+adds the `wire_encoding` block — the declaration, and `wire_codes`, the
+codes the wire carried per driven patch — and changes nothing else, so
+a schema-1 artifact reads as schema 2 over `rgb12`. A loader given
 artifacts whose blocks differ shall refuse to compare them as one
 measurement.

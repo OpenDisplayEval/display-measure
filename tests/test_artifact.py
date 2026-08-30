@@ -22,7 +22,7 @@ from display_measure.artifact import (
     render,
     write,
 )
-from display_measure.wire import RGB12, V210, representable
+from display_measure.wire import RGB12, V210, encode_pixel
 
 
 def sample_artifact() -> MeasurementsArtifact:
@@ -133,6 +133,7 @@ def full_protocol_artifact() -> MeasurementsArtifact:
         sample_artifact(),
         protocol_name="color-wrangler/characterize/1",
         presentation_order=("black", "gray_0016", "white"),
+        wire_codes=((0, 0, 0), (16, 16, 16), (4095, 4095, 4095)),
         per_channel_response=PerChannelResponse(red=ramp, green=ramp, blue=ramp),
         gray_response=ramp,
         additivity=AdditivityTriad(
@@ -271,10 +272,11 @@ def test_schema_keeps_the_name_it_was_promoted_under() -> None:
 # --- the wire encoding is recorded -----------------------------------------
 
 
-def test_render_records_the_identity_encoding_without_a_representable_list() -> None:
+def test_render_records_the_identity_encoding() -> None:
     doc = yaml.safe_load(render(full_protocol_artifact()))
     assert doc["schema"] == SCHEMA
-    assert doc["wire_encoding"] == {
+    encoding = doc["wire_encoding"]
+    assert {k: v for k, v in encoding.items() if k != "wire_codes"} == {
         "layout": "r12b",
         "bit_depth": 12,
         "sampling": "rgb",
@@ -283,6 +285,8 @@ def test_render_records_the_identity_encoding_without_a_representable_list() -> 
         "matrix": "identity",
         "legal_codes": {"rgb": [0, 4095]},
     }
+    # The identity link carries the protocol codes as driven.
+    assert encoding["wire_codes"] == [[0, 0, 0], [16, 16, 16], [4095] * 3]
 
 
 def v210_artifact() -> MeasurementsArtifact:
@@ -292,58 +296,38 @@ def v210_artifact() -> MeasurementsArtifact:
     return replace(
         full,
         wire_encoding=V210,
-        representable_codes=tuple(
-            representable(V210, codes[name]) for name in full.presentation_order
+        wire_codes=tuple(
+            encode_pixel(V210, codes[name]) for name in full.presentation_order
         ),
     )
 
 
-def test_render_records_what_a_narrow_link_could_carry() -> None:
-    """Gray 16 reached the device as 14: the artifact says so, in
-    presentation order beside the patch names."""
+def test_render_records_what_the_wire_carried() -> None:
+    """Gray 16 rode the link as luma 67: the artifact says what the device
+    received, in presentation order beside the patch names."""
     doc = yaml.safe_load(render(v210_artifact()))
     encoding = doc["wire_encoding"]
     assert (encoding["layout"], encoding["bit_depth"]) == ("v210", 10)
     assert (encoding["sampling"], encoding["subsampling"]) == ("ycbcr", "422")
     assert (encoding["levels"], encoding["matrix"]) == ("narrow", "bt709")
     assert encoding["legal_codes"] == {"luma": [64, 940], "chroma": [64, 960]}
-    assert encoding["representable_codes"] == [[0, 0, 0], [14, 14, 14], [4095] * 3]
+    assert encoding["wire_codes"] == [[64, 512, 512], [67, 512, 512], [940, 512, 512]]
     assert render(v210_artifact()) == render(v210_artifact())
 
 
-def test_representable_codes_parallel_the_presentation_order() -> None:
-    with pytest.raises(ValueError, match="representable_codes"):
-        replace(v210_artifact(), representable_codes=((0, 0, 0),))
+def test_wire_codes_parallel_the_presentation_order() -> None:
+    with pytest.raises(ValueError, match="wire_codes"):
+        replace(v210_artifact(), wire_codes=((0, 0, 0),))
 
 
-def test_representable_codes_are_present_exactly_when_the_link_is_narrow() -> None:
-    """An identity link carries every code, so listing them would be
-    noise; a narrow link that listed none would be hiding the loss."""
-    with pytest.raises(ValueError, match="representable_codes"):
-        replace(full_protocol_artifact(), wire_encoding=V210)
-    with pytest.raises(ValueError, match="representable_codes"):
-        replace(v210_artifact(), wire_encoding=RGB12)
-
-
-def test_the_encoding_block_is_contiguous_and_the_rest_is_unchanged() -> None:
-    """Schema 2 differs from schema 1 by the schema line and one block:
-    strip both from an artifact over either link and the same
-    measurement renders the same bytes."""
-    rgb = render(full_protocol_artifact())
-    v210 = render(v210_artifact())
-    assert rgb != v210
-    assert _without_encoding(rgb) == _without_encoding(v210)
-
-
-def _without_encoding(text: str) -> str:
-    lines = text.split("\n")
-    start = lines.index("wire_encoding:")
-    end = lines.index("", start)
-    head = lines[:start]
-    # The block's leading comment lines belong to it.
-    while head and head[-1].startswith("#"):
-        head.pop()
-    return "\n".join(head + lines[end + 1 :])
+def test_artifacts_over_two_links_differ_only_in_the_encoding_block() -> None:
+    """Strip the block from an artifact over either link and the same
+    measurement remains."""
+    rgb = yaml.safe_load(render(full_protocol_artifact()))
+    v210 = yaml.safe_load(render(v210_artifact()))
+    assert rgb["wire_encoding"] != v210["wire_encoding"]
+    del rgb["wire_encoding"], v210["wire_encoding"]
+    assert rgb == v210
 
 
 # --- operator strings cannot corrupt the record ---------------------------

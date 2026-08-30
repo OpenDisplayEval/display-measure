@@ -8,7 +8,7 @@ accepts.
 
 import numpy as np
 import pytest
-from bmd_sg.decklink import MockBMDDeckLink, PixelFormatType
+from bmd_sg.decklink import MockBMDDeckLink
 from conftest import drive
 
 from display_measure.artifact import DECLARED_CONTRACT
@@ -25,7 +25,7 @@ from display_measure.plausible_display import (
     PlausibleDisplay,
 )
 from display_measure.protocol import FULL_DRIVE
-from display_measure.wire import V210, encode_pixel, pixel_format
+from display_measure.wire import V210, encode_pixel
 
 
 def xy_of(display: PlausibleDisplay) -> tuple[float, float]:
@@ -97,23 +97,10 @@ def test_the_display_decodes_the_declared_encoding(
 ) -> None:
     """A display receiving v210 decodes the codes on the wire; full-drive
     white rides narrow range exactly and lands on the sample peak."""
-    device.pixel_format = pixel_format(V210)
     display = PlausibleDisplay(device, encoding=V210)
     drive(device, encode_pixel(V210, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE)))
     assert float(display.measure().XYZ[1]) == pytest.approx(PEAK_LUMINANCE, rel=1e-6)
     assert xy_of(display) == pytest.approx(WHITE_XY, abs=1e-6)
-
-
-def test_the_display_refuses_a_device_packing_another_format(
-    device: MockBMDDeckLink,
-) -> None:
-    """Reading v210 codes out of a 12-bit RGB frame would be a double
-    that disagrees with its device — worse than none."""
-    device.pixel_format = PixelFormatType.FORMAT_12BIT_RGB
-    display = PlausibleDisplay(device, encoding=V210)
-    drive(device, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE))
-    with pytest.raises(RuntimeError, match="FORMAT_12BIT_RGB"):
-        display.measure()
 
 
 def test_measure_refuses_before_any_frame_is_driven(

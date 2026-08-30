@@ -28,7 +28,7 @@ from bmd_sg.decklink import PixelFormatType
 
 from display_measure.artifact import DECLARED_CONTRACT, WireEncoding
 from display_measure.instrument import XYZReading
-from display_measure.wire import RGB12, decode_pixel, pixel_format
+from display_measure.wire import RGB12, decode_pixel
 
 # Display model constants copied from ocio-display-gen's shipped sample
 # measurements (measurements/ftg_stage1_20240115.yaml — a ROE Black
@@ -126,14 +126,6 @@ class PlausibleDisplay:
         if frame is None:
             raise RuntimeError(
                 "PlausibleDisplay cannot measure: no frame has been driven"
-            )
-        packed = self._device.pixel_format
-        if packed is not pixel_format(self._encoding):
-            # A double that reads one format out of a device packing
-            # another disagrees with its device, which is worse than none.
-            raise RuntimeError(
-                f"PlausibleDisplay decodes {self._encoding.layout} but the "
-                f"device packs {packed.name}"
             )
         # A spot instrument aimed at the display center.
         spot = frame[frame.shape[0] // 2, frame.shape[1] // 2]

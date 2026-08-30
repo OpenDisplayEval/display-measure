@@ -265,14 +265,14 @@ name and driven order, and timestamps. Where two instruments were
 paired it also records the correction matrix, the routing threshold,
 and the instrument behind every row.
 
-**The wire encoding is recorded, and what it could carry.** Two
+**The wire encoding is recorded, and what the wire carried.** Two
 artifacts of one display over different links are different
 measurements, and a loader can only refuse to compare them if the
-artifact says which link. A narrow-range encoding cannot represent
-every 12-bit RGB code — 10-bit narrow gives luma 64–940, and the
-round trip through the processor's inverse does not land on every
-code — so the artifact records the code each patch actually reached
-the device as, not only the code the protocol intended.
+artifact says which link. The block records the declaration and, per
+driven patch, the codes the wire carried — a fact of the session. What
+a narrow-range link could not represent is derivable from those and
+the encoding (`§spec:encoding` in pypixelpack); the artifact records
+what happened, not a model of the processor's inverse.
 
 Humans do not edit it. Editing measured values only injects error, and
 machine-attestable device state is readable from device APIs, so

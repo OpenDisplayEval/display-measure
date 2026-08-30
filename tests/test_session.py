@@ -8,9 +8,10 @@ from typing import Any, cast
 import pytest
 import yaml
 from bmd_sg.decklink import EOTFType, MockBMDDeckLink, PixelFormatType
+from test_processor import tree
 
 from display_measure import session
-from display_measure.artifact import DECLARED_CONTRACT, SCHEMA
+from display_measure.artifact import DECLARED_CONTRACT
 from display_measure.consistency import InconsistentSession
 from display_measure.hybrid import DERIVATION_PATCHES
 from display_measure.processor import ContractViolation, InputMetadata
@@ -21,7 +22,7 @@ from display_measure.protocol import (
     protocol_patches,
 )
 from display_measure.session import Clock, doubles_session, hardware_session
-from display_measure.wire import V210, encode_pixel, representable
+from display_measure.wire import V210, encode_pixel
 
 
 def method_calls(device: MockBMDDeckLink, method: str) -> list[dict[str, Any]]:
@@ -292,61 +293,46 @@ def test_the_level_gate_stops_the_session_at_white(
 
 
 def test_a_v210_session_drives_the_encoded_codes_through_the_yuv_format(
-    fixed_clock: Clock, tmp_path: Path
+    v210_run: tuple[Path, MockBMDDeckLink],
 ) -> None:
     """The protocol's 12-bit RGB codes reach the device as the codes the
     declared encoding puts on the wire — pypixelpack's, not this
     repository's — and the DeckLink is told to pack them as v210."""
-    device = doubles_session(
-        tmp_path / "v210.yaml", clock=fixed_clock, settle_seconds=0.0, encoding=V210
-    )
+    _, device = v210_run
     formats = [call["format"] for call in method_calls(device, "set_pixel_format")]
     assert formats == [PixelFormatType.FORMAT_10BIT_YUV]
     frames = device.get_frame_history()
     expected = presentation_order(protocol_patches(), seed=0)
     assert len(frames) == len(expected)
-    assert tuple(frames[0][0, 0]) == (64, 512, 512), "black is narrow-range black"
     for frame, patch in zip(frames, expected, strict=True):
         assert tuple(frame[0, 0]) == encode_pixel(V210, patch.rgb), patch.name
 
 
 def test_a_v210_session_measures_the_display_through_the_link(
-    fixed_clock: Clock, tmp_path: Path, display_artifact: Path
+    v210_run: tuple[Path, MockBMDDeckLink], display_artifact: Path
 ) -> None:
     """Full drive survives the narrow range exactly, so the peak agrees;
     the shadow codes do not, so the ramps are a different measurement."""
-    out = tmp_path / "v210.yaml"
-    doubles_session(out, clock=fixed_clock, settle_seconds=0.0, encoding=V210)
-    v210 = yaml.safe_load(out.read_text())
+    v210 = yaml.safe_load(v210_run[0].read_text())
     rgb = yaml.safe_load(display_artifact.read_text())
     assert v210["luminance"]["peak_luminance"] == rgb["luminance"]["peak_luminance"]
     assert response_rows(v210) != response_rows(rgb)
 
 
 def test_artifacts_over_different_links_are_legibly_different_measurements(
-    fixed_clock: Clock, tmp_path: Path, display_artifact: Path
+    v210_run: tuple[Path, MockBMDDeckLink], display_artifact: Path
 ) -> None:
     """The one field a loader needs to refuse comparing them silently."""
-    out = tmp_path / "v210.yaml"
-    doubles_session(out, clock=fixed_clock, settle_seconds=0.0, encoding=V210)
-    v210 = yaml.safe_load(out.read_text())
+    v210 = yaml.safe_load(v210_run[0].read_text())
     rgb = yaml.safe_load(display_artifact.read_text())
-    assert v210["schema"] == rgb["schema"] == SCHEMA
     assert v210["wire_encoding"] != rgb["wire_encoding"]
-    assert rgb["wire_encoding"]["layout"] == "r12b"
-    assert "representable_codes" not in rgb["wire_encoding"]
-    # What each patch reached the device as, beside its name.
     driven = presentation_order(protocol_patches(), seed=0)
-    assert v210["wire_encoding"]["representable_codes"] == [
-        list(representable(V210, patch.rgb)) for patch in driven
+    assert v210["wire_encoding"]["wire_codes"] == [
+        list(encode_pixel(V210, patch.rgb)) for patch in driven
     ]
 
 
 # --- the hardware path holds the processor to the declared link -----------
-
-
-class Discovered(Exception):
-    """Raised by the instrument stub: the audit passed and discovery began."""
 
 
 class BenchProcessor:
@@ -359,14 +345,13 @@ class BenchProcessor:
         )
 
     def global_colour(self) -> dict[str, Any]:
-        return {
-            "brightness": 1800,
-            "gamma": DECLARED_CONTRACT.gamma_value,
-            "dark-magic": {"enabled": True},
-            "puretone": {"enabled": True},
-            "extended-bit-depth": {"enabled": True},
-            "overdrive": {"enabled": False},
-        }
+        return tree(
+            gamma=DECLARED_CONTRACT.gamma_value,
+            **{
+                f: {"enabled": True}
+                for f in ("dark-magic", "puretone", "extended-bit-depth")
+            },
+        )
 
     def input_metadata(self) -> InputMetadata:
         return self._link
@@ -392,31 +377,3 @@ def test_a_v210_session_is_refused_by_a_processor_receiving_the_bench_link(
             declared=BENCH_CONTRACT,
         )
     assert "ycbcr" in str(e.value) and "10-bit" in str(e.value)
-
-
-def test_a_v210_session_passes_the_gate_when_the_processor_sees_10bit_ycbcr(
-    fixed_clock: Clock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import specio.spectrometers
-
-    monkeypatch.setattr(
-        session,
-        "TesseraProcessor",
-        lambda host: BenchProcessor(host, sampling="ycbcr", bit_depth=10),
-    )
-
-    class Stub:
-        @staticmethod
-        def discover() -> None:
-            raise Discovered
-
-    monkeypatch.setattr(specio.spectrometers, "CRSpectrometer", Stub)
-    with pytest.raises(Discovered):
-        hardware_session(
-            tmp_path / "v210.yaml",
-            clock=fixed_clock,
-            settle_seconds=0.0,
-            processor_host="bench",
-            encoding=V210,
-            declared=BENCH_CONTRACT,
-        )

@@ -20,11 +20,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from bmd_sg.decklink import MockBMDDeckLink
+from bmd_sg.decklink import MockBMDDeckLink, PixelFormatType
 
 from display_measure.events import SessionEvent
 from display_measure.session import Clock, doubles_session
-from display_measure.wire import RGB12, pixel_format
+from display_measure.wire import V210
 
 FIXED_TIME = datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC)
 
@@ -33,7 +33,7 @@ FIXED_TIME = datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC)
 def device() -> Iterator[MockBMDDeckLink]:
     """A mock DeckLink declaring the session's wire format."""
     with MockBMDDeckLink(0) as mock:
-        mock.pixel_format = pixel_format(RGB12)
+        mock.pixel_format = PixelFormatType.FORMAT_12BIT_RGB
         yield mock
 
 
@@ -68,6 +68,16 @@ def display_run(
         logger.removeHandler(handler)
         logger.setLevel(previous_level)
     return (out, stream.getvalue(), device)
+
+
+@pytest.fixture(scope="session")
+def v210_run(
+    tmp_path_factory: pytest.TempPathFactory, fixed_clock: Clock
+) -> tuple[Path, MockBMDDeckLink]:
+    """One doubles session over the v210 link: artifact path and device."""
+    out = tmp_path_factory.mktemp("v210") / "measurements.yaml"
+    device = doubles_session(out, clock=fixed_clock, settle_seconds=0.0, encoding=V210)
+    return (out, device)
 
 
 @pytest.fixture(scope="session")

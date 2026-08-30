@@ -110,7 +110,7 @@ from display_measure.protocol import (
     protocol_patches,
 )
 from display_measure.session_log import log_events
-from display_measure.wire import RGB12, encode_pixel, pixel_format, representable
+from display_measure.wire import RGB12, encode_pixel
 
 __all__ = [
     "Clock",
@@ -239,6 +239,25 @@ def ambient_gate(reading: InstrumentReading) -> float:
     return luminance(reading)
 
 
+def _pixel_format(encoding: WireEncoding) -> PixelFormatType:
+    """The device format that packs the declared layout.
+
+    pypixelpack's layout names are the DeckLink FourCCs, so the map is
+    the enum itself; the bit depths are checked against each other so a
+    declaration cannot drift from what the device is set to.
+    """
+    by_fourcc = {f.value.lower(): f for f in PixelFormatType}
+    packed = by_fourcc.get(encoding.layout)
+    if packed is None:
+        raise ValueError(f"no DeckLink pixel format packs {encoding.layout!r}")
+    if packed.bit_depth != encoding.bit_depth:
+        raise ValueError(
+            f"{encoding.layout} is declared {encoding.bit_depth}-bit but "
+            f"{packed.name} packs {packed.bit_depth}-bit"
+        )
+    return packed
+
+
 def _setup_drive(device: PatchDrive, encoding: WireEncoding, emit: EventSink) -> None:
     """Declare pixel format and EOTF signaling, then start playback.
 
@@ -247,7 +266,7 @@ def _setup_drive(device: PatchDrive, encoding: WireEncoding, emit: EventSink) ->
     defaults to PQ InfoFrames, which would fault an SDR-contract
     display, so the session signals explicitly (§spec:sessions).
     """
-    packed = pixel_format(encoding)
+    packed = _pixel_format(encoding)
     device.pixel_format = packed
     device.set_hdr_metadata(HDRMetadata(eotf=EOTFType.SDR))
     device.start_playback()
@@ -480,13 +499,8 @@ def _characterize(
         session_start=session_start,
         session_end=session_end,
         wire_encoding=encoding,
-        # What each patch reached the device as; the identity link
-        # carries every code and records nothing.
-        representable_codes=(
-            None
-            if encoding.identity
-            else tuple(representable(encoding, patch.rgb) for patch in presented)
-        ),
+        # What the wire carried for each patch, as driven.
+        wire_codes=tuple(encode_pixel(encoding, patch.rgb) for patch in presented),
         protocol_name=PROTOCOL_NAME,
         presentation_order=tuple(patch.name for patch in presented),
         per_channel_response=PerChannelResponse(
