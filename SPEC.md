@@ -73,10 +73,45 @@ decision informed by display-report's analysis.
 **The wire is declared.** The encoding between a patch and the device
 — bit depth, sampling, levels, colour matrix, layout — is a session
 parameter, defaulting to the bench's 12-bit RGB identity. The session
-encodes through the shared packer and implements no conversion; the
-format-confirmation gate holds the processor to the declaration, and
-the artifact records it. Why the wire is its own layer:
+encodes through the shared packer and implements no conversion, and the
+artifact records what it drove. Why the wire is its own layer:
 `§spec:architecture`.
+
+**A link answers for as much of itself as it can, and the rest is
+measured.** HDMI carries InfoFrames, so the processor detects the bit
+depth, sampling and HDR format and republishes them; the gate holds the
+declaration against all three. SDI carries no equivalent the processor
+exposes, and its input controls are settings rather than detections, so
+it answers for none of them. The gate therefore reports the fields a
+link left unanswered rather than reading silence as agreement, and the
+session says which ones went unchecked. A gate that passes because
+nobody contradicted it is not the same as one that passes because the
+processor agreed.
+
+**The gate runs while the session is driving.** A processor reports the
+format it is receiving, so asking before playback starts compares the
+declaration against whatever last drove the link. The gate runs after
+the drive is up, at the cost of a refusal arriving with the rig already
+open — cheaper than a verdict that depends on what ran previously.
+
+**The range probe measures what the link cannot report.** Patches
+authored in RGB can only encode to codes inside the declared span, so
+none of them distinguishes a processor reading a narrow link as full
+from a display with a lifted black. Six patches straddle the span's two
+edges in wire codes, and the step taken outside each edge against the
+step taken inside it says whether the processor clips there. Both links
+are probed; only the expected answer differs. A narrow link clips
+outside its span; an identity link carries every code, so the probe
+straddles the limited span instead and requires that it does not clip.
+
+**The colour matrix is declared, not discovered.** Nothing on a YCbCr
+link tells the session which matrix the processor decodes with, and the
+mismatch is nearly invisible: neutral patches encode identically under
+every matrix, and full-drive primaries decode past 1.0 and clip back to
+the right answer. It surfaces only on colours with headroom in every
+channel. The matrix is therefore part of the declaration, recorded in
+the artifact, and a consumer comparing two artifacts compares what each
+one states rather than assuming they match.
 
 **Instruments have doubles.** The default double is a deterministic
 plausible display — an additive per-channel model that synthesizes the
