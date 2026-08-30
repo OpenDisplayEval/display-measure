@@ -57,33 +57,61 @@ non-zero naming the field, before any patch is driven.
 ## Self-describing measurement seam §road:measurement-seam
 
 The measure and validate layers meet at one file that states what
-produced it. Upstream: `§road:measurement-seam`.
+produced it. Upstream: `§road:measurement-seam`. CSMF replaces the
+YAML artifact, so this section retires a format as well as adding one.
+
+### Close the loader gap upstream §road:specio-loader-gap
+
+Send colour-specio a fix reading its measurement file's colorimetric
+rows, which its loader drops, and plumbing the reserved ancillary
+field through the measurement dataclass; pin the fork until it
+merges. §spec:scope.
 
 ### Retain spectra with per-row provenance §road:spectral-provenance
 
 Keep the spectral distribution behind each reading and record whether
-it was measured, reconstructed or absent.
-§spec:measurements-artifact.
+it was measured, reconstructed or absent, in
+`display_measure/artifact.py` and `display_measure/hybrid.py`.
+§spec:measurements-artifact. Depends on §road:specio-loader-gap.
 
 ### Reconstruct shadow spectra §road:spectral-reconstruction
 
 Give colorimeter-routed rows a spectrum scaled from the bright-regime
 measurement of the same stimulus, naming the luminance span it was
-derived across. §spec:measurements-artifact. Depends on
-§road:spectral-provenance.
+derived across, in `display_measure/hybrid.py`.
+§spec:measurements-artifact. Depends on §road:spectral-provenance.
+
+### Hash the canonical projection §road:canonical-projection-hash
+
+Compute the artifact digest from the existing canonical rendering of
+the parsed values rather than from file bytes, in
+`display_measure/artifact.py`. §spec:measurements-artifact.
 
 ### Emit the seam file §road:emit-csmf
 
-Write CSMF carrying the spectra, protocol name, declared signal
-contract, attested panel state and input hashes.
-§spec:measurements-artifact. Depends on §road:spectral-provenance.
+Write CSMF carrying the spectra, with the protocol name, declared
+signal contract, attested panel state and input hashes in the
+provenance block its ancillary field holds, in
+`display_measure/artifact.py`. §spec:measurements-artifact. Depends on
+§road:spectral-provenance and §road:canonical-projection-hash.
+
+### Retire the YAML artifact §road:retire-yaml-artifact
+
+Drop the YAML measurements file as an output, keeping its renderer as
+the hashing projection, in `display_measure/artifact.py`.
+§spec:measurements-artifact. Depends on §road:emit-csmf; cross-repo:
+blocked until ocio-display-gen reads CSMF (`§road:ocio-reads-csmf`
+there).
 
 ### Report-grade protocol tier §road:report-grade-protocol
 
 Add the named protocol tier carrying the colour cube, random samples
-and black/white repeats a distribution needs. §spec:patch-protocol.
+and black/white repeats a distribution needs, in
+`display_measure/protocol.py` and MEASUREMENT.md. §spec:patch-protocol.
 
 **Verify:** a file written by `display-measure characterize` names the
-protocol and transfer function it was measured under, and its
+protocol and transfer function it was measured under; its
 reconstructed rows are named so an analysis needing a measured
-spectrum can exclude them.
+spectrum can exclude them; its digest verifies after a re-serialization
+that preserves content; and `display-report analyze` reads it with no
+conversion step.

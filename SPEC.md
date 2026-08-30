@@ -43,9 +43,17 @@ Not owned here: OCIO semantics and config generation (ocio-display-gen),
 and the promotion decision (color-wrangler). Device layers are
 referenced, never re-specified: bmd-signal-gen owns patch rendering and
 wire-format correctness, pydecklink owns device access, colour-specio
-owns instrument communication. colour-specio is pinned to a PyPI
-release and never forked; its `measure()` surface is the driver
-contract, and upstream is the venue for fixes.
+owns instrument communication; its `measure()` surface is the driver
+contract.
+
+colour-specio is a fork of `colour-science/colour-specio`, org-owned
+and tracking upstream, carrying device support upstream does not have
+yet. Upstream stays the venue for fixes and the fork's delta stays
+small enough to send there; the fork is the pin until a fix merges.
+The seam file's format is colour-specio's too
+(`§spec:measurement-seam`), so a gap in its measurement file reader is
+a gap in this layer's output — fixed upstream, not worked around
+here.
 
 ## Measurement sessions §spec:measure-sessions
 
@@ -295,3 +303,21 @@ downstream loaders dispatch on them, so renaming either breaks the
 provenance of every artifact already promoted. They change only when
 the format they name changes: schema 2 added the wire encoding block,
 and a schema-1 artifact implied the bench's 12-bit RGB link.
+
+**The artifact is the seam file** (`§spec:measurement-seam`). It is
+CSMF, carrying the spectra behind each reading and its per-row
+spectral provenance, with everything above — contract, panel state,
+protocol name, instrument identity, hashes — in the provenance block
+CSMF's reserved ancillary field holds. One file: CSMF replaces the
+YAML rendering rather than joining it, because a pipeline with two
+measurements files of record has none.
+
+**Determinism survives the format change through the projection, not
+the bytes.** Byte-determinism was a property of the YAML rendering,
+and protobuf guarantees round-trip rather than canonical encoding — a
+digest over raw file bytes would rotate on a dependency upgrade. The
+digest therefore covers the same canonical rendering as before, now
+computed from the parsed values instead of written to disk: fixed key
+order, nine-decimal floats, LF, UTF-8. The renderer is retained and
+repurposed; the artifact stays self-verifying, and a re-serialized
+file with identical content still verifies.
