@@ -42,6 +42,11 @@ dependencies = [
     # colour-specio's measure() surface is the driver contract.
     "colour-specio==0.4.2a0",
     "numpy>=2.3.1",
+    # The wire encoding between a patch and the device (§spec:measure-
+    # sessions): the session declares one and pypixelpack encodes it, so
+    # no conversion is implemented here. Commit pin — the encoding API is
+    # ahead of pypixelpack's last tag; move to `v1.1.0` once it is cut.
+    "pypixelpack",
     # The contract audit reads the show manifest's signal_contract
     # (§spec:session-gates). The artifact writer still emits YAML by hand.
     "pyyaml>=6.0.1",
@@ -69,6 +74,7 @@ packages = ["display_measure"]
 
 [tool.uv.sources]
 bmd-signal-generator = { git = "https://github.com/OpenLEDEval/bmd-signal-gen", tag = "v0.2.1" }
+pypixelpack = { git = "https://github.com/Fuse-Technical-Group/pypixelpack", rev = "fae50252ce70397da26ba819273a5f8c946c0df7" }
 
 [dependency-groups]
 dev = [
