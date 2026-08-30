@@ -54,6 +54,13 @@ sees a refusal with no gate behind it. §spec:session-events,
 features, wire format or ambient floor contradicts the manifest exits
 non-zero naming the field, before any patch is driven.
 
+### Hold the ramp floor against the instrument's §road:ramp-floor
+
+Refuse, or route, the ramp rungs a session cannot resolve: compare each
+rung's predicted step against the instrument's repeatability at that
+luminance and say so before driving 72 patches.
+§spec:patch-protocol. Depends on §road:pre-session-gate-events.
+
 ## Self-describing measurement seam §road:measurement-seam
 
 The measure and validate layers meet at one file that states what
