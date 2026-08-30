@@ -79,8 +79,29 @@ def test_the_gate_compares_what_the_encoding_puts_on_the_wire() -> None:
     )
 
 
-def test_the_named_encodings_are_the_two_the_cli_offers() -> None:
-    assert WIRE_ENCODINGS == {"rgb12": RGB12, "v210": V210}
+def test_the_named_encodings_are_the_ones_the_cli_offers() -> None:
+    assert WIRE_ENCODINGS == {
+        "rgb12": RGB12,
+        "v210": V210,
+        "v210-bt2020": wire.V210_BT2020,
+    }
+
+
+def test_the_two_v210_encodings_differ_only_in_matrix() -> None:
+    """Same layout, same span, same subsampling — a different decode.
+
+    Nothing on the wire distinguishes them, which is the reason the
+    matrix is declared and the reason a mismatch went unnoticed: it is
+    invisible on neutrals and clips out of sight on the primaries.
+    """
+    assert V210.matrix == "bt709" and wire.V210_BT2020.matrix == "bt2020"
+    for field in ("layout", "bit_depth", "sampling", "subsampling", "levels"):
+        assert getattr(V210, field) == getattr(wire.V210_BT2020, field)
+    neutral = (2048, 2048, 2048)
+    assert encode_pixel(V210, neutral) == encode_pixel(wire.V210_BT2020, neutral)
+    assert encode_pixel(V210, (FULL_DRIVE, 0, 0)) != encode_pixel(
+        wire.V210_BT2020, (FULL_DRIVE, 0, 0)
+    )
 
 
 def test_a_code_above_full_drive_is_refused() -> None:

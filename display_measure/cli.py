@@ -73,6 +73,7 @@ class WireChoice(StrEnum):
 
     RGB12 = "rgb12"
     V210 = "v210"
+    V210_BT2020 = "v210-bt2020"
 
 
 @app.callback()
@@ -162,9 +163,11 @@ def characterize(
         "--wire",
         help=(
             "Wire encoding the patches ride to the device: rgb12 (12-bit "
-            "RGB identity, the bench HDMI link) or v210 (10-bit BT.709 "
-            "narrow-range 4:2:2 YCbCr). The session refuses a processor "
-            "receiving anything else, and the artifact records it."
+            "RGB identity, the bench HDMI link), v210 (10-bit BT.709 "
+            "narrow-range 4:2:2 YCbCr) or v210-bt2020 (the same layout "
+            "under BT.2020, which the bench processor decodes with). The "
+            "session refuses a processor receiving anything else, probes "
+            "the link's range, and the artifact records what it drove."
         ),
     ),
     processor: str | None = typer.Option(

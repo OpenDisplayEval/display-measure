@@ -63,8 +63,23 @@ def _ycbcr(layout: str, *, matrix: str, levels: str) -> WireEncoding:
 # 10-bit BT.709 narrow-range 4:2:2: the YCbCr link a broadcast chain drives.
 V210 = _ycbcr("v210", matrix="bt709", levels="narrow")
 
+# The same layout under BT.2020. Not a variant for completeness: a YCbCr
+# link carries no way for the processor to tell the session which matrix
+# it decodes with, and the bench processor decodes v210 as BT.2020 while
+# the session declared BT.709. That mismatch is nearly invisible --
+# neutrals are matrix-independent, and full-drive primaries decode past
+# 1.0 and clip back to the right answer -- so it showed up only as an
+# 11% luminance deficit on red, and as errors of both signs on mixed
+# colours (§spec:measure-sessions). The matrix is therefore declared per
+# session rather than assumed.
+V210_BT2020 = _ycbcr("v210", matrix="bt2020", levels="narrow")
+
 # What `--wire` offers, by name.
-WIRE_ENCODINGS: dict[str, WireEncoding] = {"rgb12": RGB12, "v210": V210}
+WIRE_ENCODINGS: dict[str, WireEncoding] = {
+    "rgb12": RGB12,
+    "v210": V210,
+    "v210-bt2020": V210_BT2020,
+}
 
 
 def _check(rgb: tuple[int, int, int]) -> None:

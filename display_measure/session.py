@@ -32,6 +32,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Protocol
 
@@ -362,6 +363,7 @@ def characterize(
     encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
     reading: ProcessorStateSnapshot | None = None,
+    wire_check: Callable[[], None] | None = None,
     emit: EventSink = log_events,
     cancelled: Cancelled = never_cancelled,
 ) -> None:
@@ -405,6 +407,7 @@ def characterize(
             encoding=encoding,
             declared=declared,
             reading=reading,
+            wire_check=wire_check,
             emit=emit,
             cancelled=cancelled,
             session_start=session_start,
@@ -422,6 +425,7 @@ def _characterize(
     encoding: WireEncoding,
     declared: ProcessorStateSnapshot,
     reading: ProcessorStateSnapshot | None,
+    wire_check: Callable[[], None] | None,
     emit: EventSink,
     cancelled: Cancelled,
     session_start: datetime,
@@ -453,6 +457,8 @@ def _characterize(
         )
 
     _setup_drive(device, encoding, emit)
+    if wire_check is not None:
+        wire_check()
 
     # The session opens on black — presentation_order pins it first;
     # the ambient gate consumes that opening reading and black_level
@@ -758,10 +764,12 @@ def doubles_session(
 def _audit_processor(
     processor_host: str | None,
     declared: ProcessorStateSnapshot,
-    encoding: WireEncoding,
-    emit: EventSink = log_events,
 ) -> ProcessorStateSnapshot:
-    """Read the processor and gate on it, before any hardware is touched."""
+    """Read the processor and gate on it, before any hardware is touched.
+
+    The wire format is not audited here; it cannot be, before the session
+    drives the link. See `audit_wire_when_driving`.
+    """
     if processor_host is None:
         raise ContractViolation(
             "no processor host given: a session cannot audit a contract it "
@@ -772,6 +780,35 @@ def _audit_processor(
     global_colour = processor.global_colour()
     reading = audit_contract(declared, state_from_tessera(global_colour))
     audit_output_scaling(global_colour)
+    return reading
+
+
+# How long the processor is given to lock to a format the session has just
+# started driving. Measured on the bench: an S8 republishes its input
+# metadata within about a second of a format change.
+WIRE_RELOCK_SECONDS = 2.0
+
+
+def audit_wire_when_driving(
+    processor_host: str,
+    encoding: WireEncoding,
+    emit: EventSink = log_events,
+) -> None:
+    """Hold the processor to the link, once the session is actually driving it.
+
+    This gate cannot run with the others. The processor reports the
+    format it is *receiving*, and before playback starts that is
+    whatever ran last -- so auditing early compares the declaration
+    against a stale link and refuses or passes on someone else's signal.
+    Found on the bench: an rgb12 session was refused for driving 8-bit
+    ycbcr422 because the previous run had left the device in v210.
+
+    The cost of moving it is a rig already open when a refusal lands,
+    which is the right trade: the alternative is a gate whose verdict
+    depends on run order.
+    """
+    time.sleep(WIRE_RELOCK_SECONDS)
+    processor = TesseraProcessor(processor_host)
     unverified = audit_wire_format(
         WireFormat.for_encoding(encoding), processor.input_metadata()
     )
@@ -784,11 +821,9 @@ def _audit_processor(
                 encoding.layout,
                 unverified,
                 "the processor publishes no metadata for these on this link; "
-                "the range probe measures what it can and the rest rides on "
-                "the declaration",
+                "what it cannot report rides on the declaration",
             )
         )
-    return reading
 
 
 def hardware_session(
@@ -817,7 +852,9 @@ def hardware_session(
     drives the protocol through the DeckLink. Discovery is by instrument
     type, so both instruments may stay plugged in.
     """
-    reading = _audit_processor(processor_host, declared, encoding)
+    reading = _audit_processor(processor_host, declared)
+    assert processor_host is not None  # _audit_processor refuses without one
+    wire_check = partial(audit_wire_when_driving, processor_host, encoding, emit)
 
     # Deferred: specio drags colour + scipy (~0.8 s) that no doubles
     # path and no `--help` ever needs.
@@ -846,6 +883,7 @@ def hardware_session(
             encoding=encoding,
             declared=declared,
             reading=reading,
+            wire_check=wire_check,
             emit=emit,
             cancelled=cancelled,
         )
