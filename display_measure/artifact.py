@@ -33,8 +33,11 @@ from pathlib import Path
 # was named in: the artifact writer moved to display-measure, and this
 # string did not follow it. Every promoted artifact carries it, and
 # downstream loaders dispatch on it — renaming it breaks the provenance
-# of every artifact already promoted.
-SCHEMA = "color-wrangler/measurements/1"
+# of every artifact already promoted. It changes only when the format
+# changes: 2 added `wire_encoding`, so a loader can tell two artifacts
+# of one display over different links apart; a schema-1 artifact
+# implied the bench's 12-bit RGB link.
+SCHEMA = "color-wrangler/measurements/2"
 
 # Nine decimals sits below any instrument's repeatability while keeping
 # the rendered bytes independent of Python's float repr.
@@ -334,6 +337,7 @@ class MeasurementsArtifact:
     processor_state: ProcessorStateSnapshot
     session_start: datetime
     session_end: datetime
+    wire_encoding: WireEncoding
     protocol_name: str | None = None
     presentation_order: tuple[str, ...] | None = None
     per_channel_response: PerChannelResponse | None = None
@@ -347,6 +351,12 @@ class MeasurementsArtifact:
     # reproduction runs render zeros and stay byte-deterministic.
     # Workflow telemetry for driving session time down, not colorimetry.
     patch_seconds: tuple[float, ...] | None = None
+    # The protocol code each driven patch reached the device as, after
+    # the round trip through the declared encoding; presentation order.
+    # Present exactly when the link is not the identity: an identity
+    # link carries every code, and a narrow one that listed none would
+    # be hiding the loss.
+    representable_codes: tuple[tuple[int, int, int], ...] | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -360,9 +370,17 @@ class MeasurementsArtifact:
                 "protocol_name and presentation_order name one protocol "
                 "together; got one without the other"
             )
+        if (self.representable_codes is None) != self.wire_encoding.identity:
+            raise ValueError(
+                "representable_codes is required for a non-identity wire "
+                "encoding and forbidden for the identity; got "
+                f"{self.wire_encoding.layout} with "
+                f"{'none' if self.representable_codes is None else 'a list'}"
+            )
         routing = self.instrument_routing
         for field, values in (
             ("patch_seconds", self.patch_seconds),
+            ("representable_codes", self.representable_codes),
             ("sources", None if routing is None else routing.sources),
         ):
             if values is not None and (
@@ -421,6 +439,38 @@ def _routing_lines(routing: InstrumentRouting) -> list[str]:
         f"  sources: [{sources}]",
         "",
     ]
+
+
+def _encoding_lines(
+    encoding: WireEncoding,
+    representable: tuple[tuple[int, int, int], ...] | None,
+) -> list[str]:
+    lines = [
+        "# The link the patches rode to the device: declared per session,",
+        "# held against the processor's input metadata, and recorded so two",
+        "# artifacts of one display over different links read as different",
+        "# measurements (§spec:measurements-artifact).",
+        "wire_encoding:",
+        f'  layout: "{encoding.layout}"',
+        f"  bit_depth: {encoding.bit_depth}",
+        f'  sampling: "{encoding.sampling}"',
+        f'  subsampling: "{encoding.subsampling}"',
+        f'  levels: "{encoding.levels}"',
+        f'  matrix: "{encoding.matrix}"',
+        "  # The inclusive code span the link carries, per component.",
+        "  legal_codes:",
+        *(f"    {name}: [{lo}, {hi}]" for name, lo, hi in encoding.legal_codes),
+    ]
+    if representable is not None:
+        lines += [
+            "  # This link cannot carry every 12-bit RGB protocol code. The",
+            "  # code each driven patch reached the device as — encoded, then",
+            "  # decoded through the declared matrix and levels — in the same",
+            "  # order as presentation_order.",
+            "  representable_codes:",
+            *(f"    - [{r}, {g}, {b}]" for r, g, b in representable),
+        ]
+    return [*lines, ""]
 
 
 def _response_lines(points: tuple[ResponsePoint, ...], indent: str) -> list[str]:
@@ -496,6 +546,7 @@ def render(artifact: MeasurementsArtifact) -> str:
             for feature in PROCESSING_FEATURES
         ],
         "",
+        *_encoding_lines(artifact.wire_encoding, artifact.representable_codes),
     ]
     if artifact.protocol_name is not None and artifact.presentation_order is not None:
         lines += [

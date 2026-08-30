@@ -110,7 +110,7 @@ from display_measure.protocol import (
     protocol_patches,
 )
 from display_measure.session_log import log_events
-from display_measure.wire import RGB12, encode_pixel, pixel_format
+from display_measure.wire import RGB12, encode_pixel, pixel_format, representable
 
 __all__ = [
     "Clock",
@@ -479,6 +479,14 @@ def _characterize(
         processor_state=recorded_state,
         session_start=session_start,
         session_end=session_end,
+        wire_encoding=encoding,
+        # What each patch reached the device as; the identity link
+        # carries every code and records nothing.
+        representable_codes=(
+            None
+            if encoding.identity
+            else tuple(representable(encoding, patch.rgb) for patch in presented)
+        ),
         protocol_name=PROTOCOL_NAME,
         presentation_order=tuple(patch.name for patch in presented),
         per_channel_response=PerChannelResponse(

@@ -13,8 +13,11 @@ shuffle, or reordering what leads, is.
 
 ## Patch inventory
 
-72 patches, device-referred raw code values at the declared wire
-format (12-bit RGB, full drive 4095), no OCIO in the loop:
+72 patches, device-referred 12-bit RGB code values (full drive 4095),
+no OCIO in the loop. The codes are the protocol's whatever link carries
+them; the wire encoding is a session parameter (see Session
+parameters), and a link that cannot carry every code records which it
+did:
 
 | Group | Patches | Fills |
 | --- | --- | --- |
@@ -120,6 +123,19 @@ the protocol again.
   against the built-in recommended contract, which is unlikely to match
   a given rig; without `--processor` a hardware session refuses
   outright. The doubles declare compliance and need neither.
+- Wire encoding: `--wire` declares the link the patches ride to the
+  device — `rgb12` (12-bit RGB identity, the bench HDMI link; default)
+  or `v210` (10-bit BT.709 narrow-range 4:2:2 YCbCr). The session
+  encodes through pypixelpack and implements no conversion; the
+  format-confirmation gate holds the processor's input metadata to the
+  declaration (§spec:session-gates). The artifact records the
+  declaration as `wire_encoding` — layout, bit depth, sampling, levels,
+  matrix and the `legal_codes` each component can carry — and, for a
+  link that cannot carry every 12-bit code, `representable_codes`: the
+  code each patch reached the device as, in presentation order. Gray
+  16 rides v210 as luma 67 and decodes to 14; the artifact says 14.
+  Two artifacts of one display over different links are different
+  measurements.
 - Instrument: `--instrument` selects it. CR-300 class for
   characterization-grade sessions; a bare colorimeter is drift-check
   grade only. A hybrid session keeps characterization grade while
@@ -138,3 +154,12 @@ the protocol again.
   cd/m². A hybrid session also reads the colorimeter on every patch:
   the threshold is stated in measured luminance, and the fast
   instrument is the one that can measure it cheaply.
+
+## Artifact schema
+
+`color-wrangler/measurements/2` (§spec:measurements-artifact). Schema 1
+carried no wire encoding: every artifact implied the bench's 12-bit RGB
+link. Schema 2 adds the `wire_encoding` block and changes nothing else,
+so a schema-1 artifact reads as schema 2 over `rgb12`. A loader given
+artifacts whose blocks differ shall refuse to compare them as one
+measurement.

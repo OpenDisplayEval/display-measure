@@ -70,6 +70,14 @@ control-systems project, not glue. A session characterizes or verifies
 once and reports; escalation to fitted or corrective LUTs is a human
 decision informed by display-report's analysis.
 
+**The wire is declared.** The encoding between a patch and the device
+— bit depth, sampling, levels, colour matrix, layout — is a session
+parameter, defaulting to the bench's 12-bit RGB identity. The session
+encodes through the shared packer and implements no conversion; the
+format-confirmation gate holds the processor to the declaration, and
+the artifact records it. Why the wire is its own layer:
+`§spec:architecture`.
+
 **Instruments have doubles.** The default double is a deterministic
 plausible display — an additive per-channel model that synthesizes the
 reading for the frame being driven — so the hardware-free
@@ -252,10 +260,19 @@ The session's output is one file: machine-written, immutable, never
 hand-edited (`§spec:artifact-chain`). It carries the measured
 primaries and white point, black level and peak luminance in absolute
 cd/m², per-channel response, ambient floor, instrument identity and
-firmware, the processor-state snapshot, the protocol name and driven
-order, and timestamps. Where two instruments were paired it also
-records the correction matrix, the routing threshold, and the
-instrument behind every row.
+firmware, the processor-state snapshot, the wire encoding, the protocol
+name and driven order, and timestamps. Where two instruments were
+paired it also records the correction matrix, the routing threshold,
+and the instrument behind every row.
+
+**The wire encoding is recorded, and what it could carry.** Two
+artifacts of one display over different links are different
+measurements, and a loader can only refuse to compare them if the
+artifact says which link. A narrow-range encoding cannot represent
+every 12-bit RGB code — 10-bit narrow gives luma 64–940, and the
+round trip through the processor's inverse does not land on every
+code — so the artifact records the code each patch actually reached
+the device as, not only the code the protocol intended.
 
 Humans do not edit it. Editing measured values only injects error, and
 machine-attestable device state is readable from device APIs, so
@@ -270,10 +287,11 @@ nine-decimal float formatting below any instrument's repeatability, LF
 line endings, UTF-8.
 
 **Two strings are wire identifiers, not package names.** The artifact
-schema is `color-wrangler/measurements/1` and the characterize
+schema is `color-wrangler/measurements/2` and the characterize
 protocol is `color-wrangler/characterize/3`. Both outlived the
 repository they were named in: the session core moved here and the
 strings did not follow it. Every promoted artifact carries them, and
 downstream loaders dispatch on them, so renaming either breaks the
 provenance of every artifact already promoted. They change only when
-the format they name changes.
+the format they name changes: schema 2 added the wire encoding block,
+and a schema-1 artifact implied the bench's 12-bit RGB link.

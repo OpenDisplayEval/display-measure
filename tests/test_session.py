@@ -9,7 +9,7 @@ import pytest
 import yaml
 from bmd_sg.decklink import EOTFType, MockBMDDeckLink, PixelFormatType
 
-from display_measure.artifact import DECLARED_CONTRACT
+from display_measure.artifact import DECLARED_CONTRACT, SCHEMA
 from display_measure.consistency import InconsistentSession
 from display_measure.hybrid import DERIVATION_PATCHES
 from display_measure.processor import ContractViolation
@@ -20,7 +20,7 @@ from display_measure.protocol import (
     protocol_patches,
 )
 from display_measure.session import Clock, doubles_session
-from display_measure.wire import V210, encode_pixel
+from display_measure.wire import V210, encode_pixel, representable
 
 
 def method_calls(device: MockBMDDeckLink, method: str) -> list[dict[str, Any]]:
@@ -320,3 +320,22 @@ def test_a_v210_session_measures_the_display_through_the_link(
     rgb = yaml.safe_load(display_artifact.read_text())
     assert v210["luminance"]["peak_luminance"] == rgb["luminance"]["peak_luminance"]
     assert response_rows(v210) != response_rows(rgb)
+
+
+def test_artifacts_over_different_links_are_legibly_different_measurements(
+    fixed_clock: Clock, tmp_path: Path, display_artifact: Path
+) -> None:
+    """The one field a loader needs to refuse comparing them silently."""
+    out = tmp_path / "v210.yaml"
+    doubles_session(out, clock=fixed_clock, settle_seconds=0.0, encoding=V210)
+    v210 = yaml.safe_load(out.read_text())
+    rgb = yaml.safe_load(display_artifact.read_text())
+    assert v210["schema"] == rgb["schema"] == SCHEMA
+    assert v210["wire_encoding"] != rgb["wire_encoding"]
+    assert rgb["wire_encoding"]["layout"] == "r12b"
+    assert "representable_codes" not in rgb["wire_encoding"]
+    # What each patch reached the device as, beside its name.
+    driven = presentation_order(protocol_patches(), seed=0)
+    assert v210["wire_encoding"]["representable_codes"] == [
+        list(representable(V210, patch.rgb)) for patch in driven
+    ]

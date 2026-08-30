@@ -22,6 +22,7 @@ from display_measure.artifact import (
     render,
     write,
 )
+from display_measure.wire import RGB12, V210, representable
 
 
 def sample_artifact() -> MeasurementsArtifact:
@@ -47,6 +48,7 @@ def sample_artifact() -> MeasurementsArtifact:
         ),
         session_start=datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC),
         session_end=datetime(2026, 8, 10, 12, 5, 0, tzinfo=UTC),
+        wire_encoding=RGB12,
     )
 
 
@@ -105,6 +107,7 @@ def test_naive_timestamps_are_refused() -> None:
             processor_state=sample_artifact().processor_state,
             session_start=datetime(2026, 8, 10, 12, 0, 0),
             session_end=datetime(2026, 8, 10, 12, 5, 0, tzinfo=UTC),
+            wire_encoding=RGB12,
         )
 
 
@@ -258,8 +261,89 @@ def test_schema_keeps_the_name_it_was_promoted_under() -> None:
     find-replace across the repository would corrupt the provenance of
     measurements already accepted. `PROTOCOL_NAME` is pinned the same
     way in tests/test_protocol.py; this closes the asymmetry.
+
+    Schema 2 added the wire encoding block; a schema-1 artifact implied
+    the bench's 12-bit RGB link.
     """
-    assert SCHEMA == "color-wrangler/measurements/1"
+    assert SCHEMA == "color-wrangler/measurements/2"
+
+
+# --- the wire encoding is recorded -----------------------------------------
+
+
+def test_render_records_the_identity_encoding_without_a_representable_list() -> None:
+    doc = yaml.safe_load(render(full_protocol_artifact()))
+    assert doc["schema"] == SCHEMA
+    assert doc["wire_encoding"] == {
+        "layout": "r12b",
+        "bit_depth": 12,
+        "sampling": "rgb",
+        "subsampling": "444",
+        "levels": "full",
+        "matrix": "identity",
+        "legal_codes": {"rgb": [0, 4095]},
+    }
+
+
+def v210_artifact() -> MeasurementsArtifact:
+    full = full_protocol_artifact()
+    assert full.presentation_order is not None
+    codes = {"black": (0, 0, 0), "gray_0016": (16, 16, 16), "white": (4095, 4095, 4095)}
+    return replace(
+        full,
+        wire_encoding=V210,
+        representable_codes=tuple(
+            representable(V210, codes[name]) for name in full.presentation_order
+        ),
+    )
+
+
+def test_render_records_what_a_narrow_link_could_carry() -> None:
+    """Gray 16 reached the device as 14: the artifact says so, in
+    presentation order beside the patch names."""
+    doc = yaml.safe_load(render(v210_artifact()))
+    encoding = doc["wire_encoding"]
+    assert (encoding["layout"], encoding["bit_depth"]) == ("v210", 10)
+    assert (encoding["sampling"], encoding["subsampling"]) == ("ycbcr", "422")
+    assert (encoding["levels"], encoding["matrix"]) == ("narrow", "bt709")
+    assert encoding["legal_codes"] == {"luma": [64, 940], "chroma": [64, 960]}
+    assert encoding["representable_codes"] == [[0, 0, 0], [14, 14, 14], [4095] * 3]
+    assert render(v210_artifact()) == render(v210_artifact())
+
+
+def test_representable_codes_parallel_the_presentation_order() -> None:
+    with pytest.raises(ValueError, match="representable_codes"):
+        replace(v210_artifact(), representable_codes=((0, 0, 0),))
+
+
+def test_representable_codes_are_present_exactly_when_the_link_is_narrow() -> None:
+    """An identity link carries every code, so listing them would be
+    noise; a narrow link that listed none would be hiding the loss."""
+    with pytest.raises(ValueError, match="representable_codes"):
+        replace(full_protocol_artifact(), wire_encoding=V210)
+    with pytest.raises(ValueError, match="representable_codes"):
+        replace(v210_artifact(), wire_encoding=RGB12)
+
+
+def test_the_encoding_block_is_contiguous_and_the_rest_is_unchanged() -> None:
+    """Schema 2 differs from schema 1 by the schema line and one block:
+    strip both from an artifact over either link and the same
+    measurement renders the same bytes."""
+    rgb = render(full_protocol_artifact())
+    v210 = render(v210_artifact())
+    assert rgb != v210
+    assert _without_encoding(rgb) == _without_encoding(v210)
+
+
+def _without_encoding(text: str) -> str:
+    lines = text.split("\n")
+    start = lines.index("wire_encoding:")
+    end = lines.index("", start)
+    head = lines[:start]
+    # The block's leading comment lines belong to it.
+    while head and head[-1].startswith("#"):
+        head.pop()
+    return "\n".join(head + lines[end + 1 :])
 
 
 # --- operator strings cannot corrupt the record ---------------------------
