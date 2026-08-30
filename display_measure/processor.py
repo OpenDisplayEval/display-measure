@@ -118,8 +118,8 @@ def contract_from_manifest(path: Path) -> ProcessorStateSnapshot:
     same declaration, rather than an operator retyping it into a flag where
     it can drift.
     """
-    # Deferred: the artifact writer emits YAML by hand, so nothing else on
-    # the session path pays for the parser.
+    # Deferred: the artifact renders its projection by hand, so nothing
+    # else on the session path pays for the parser.
     import yaml
 
     document = yaml.safe_load(path.read_text()) or {}

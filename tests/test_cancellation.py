@@ -67,7 +67,7 @@ def test_a_cancelled_session_writes_no_artifact(
     """The guarantee that matters. A measurements artifact is immutable
     and complete (§spec:artifact-chain), so a partial one does not
     exist — a cancelled session's output is nothing at all."""
-    out = tmp_path / "cancelled.yaml"
+    out = tmp_path / "cancelled.csmf"
     run_cancelled(out, fixed_clock, after=3)
     assert not out.exists()
     assert list(tmp_path.iterdir()) == []
@@ -78,7 +78,7 @@ def test_cancellation_lands_between_patches_not_inside_one(
 ) -> None:
     """Stopping mid-patch would leave a frame on the display with no
     reading behind it, and there is nothing to salvage by doing so."""
-    cancel = run_cancelled(tmp_path / "cancelled.yaml", fixed_clock, after=3)
+    cancel = run_cancelled(tmp_path / "cancelled.csmf", fixed_clock, after=3)
     driven = [e for e in cancel.stream if isinstance(e, PatchStarted)]
     measured = [e for e in cancel.stream if isinstance(e, PatchCompleted)]
     assert len(driven) == len(measured) == 3
@@ -86,7 +86,7 @@ def test_cancellation_lands_between_patches_not_inside_one(
 
 
 def test_the_stream_ends_cancelled(fixed_clock: Clock, tmp_path: Path) -> None:
-    cancel = run_cancelled(tmp_path / "cancelled.yaml", fixed_clock, after=2)
+    cancel = run_cancelled(tmp_path / "cancelled.csmf", fixed_clock, after=2)
     ended = [e for e in cancel.stream if isinstance(e, SessionEnded)]
     assert len(ended) == 1
     assert ended[0] is cancel.stream[-1]
@@ -97,7 +97,7 @@ def test_the_stream_ends_cancelled(fixed_clock: Clock, tmp_path: Path) -> None:
 def test_cancelling_before_the_first_patch_drives_nothing(
     fixed_clock: Clock, tmp_path: Path
 ) -> None:
-    out = tmp_path / "cancelled.yaml"
+    out = tmp_path / "cancelled.csmf"
     cancel = run_cancelled(out, fixed_clock, after=0)
     assert not [e for e in cancel.stream if isinstance(e, PatchStarted)]
     assert not out.exists()
@@ -113,7 +113,7 @@ def test_cancellation_stops_playback(fixed_clock: Clock, tmp_path: Path) -> None
         characterize(
             device=device,
             instrument=PlausibleDisplay(device),
-            out_path=tmp_path / "cancelled.yaml",
+            out_path=tmp_path / "cancelled.csmf",
             clock=fixed_clock,
             settle_seconds=0.0,
             reading=normalized_reading(),

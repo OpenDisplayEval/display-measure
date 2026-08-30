@@ -26,7 +26,6 @@ Determinism: see the determinism-seam design in
 `display_measure.artifact`'s module docstring.
 """
 
-import hashlib
 import logging
 import time
 from collections.abc import Callable, Iterator
@@ -54,6 +53,8 @@ from display_measure.artifact import (
     ProcessorStateSnapshot,
     ResponsePoint,
     WireEncoding,
+    check_seam_path,
+    verify,
     write,
 )
 from display_measure.consistency import InconsistentSession
@@ -317,9 +318,21 @@ def _log_instrument(instrument: Instrument, note: str = "") -> None:
 
 
 def _handoff(artifact: MeasurementsArtifact, out_path: Path, emit: EventSink) -> None:
-    """Write the immutable artifact and report its hash."""
-    data = write(artifact, out_path)
-    emit(HandoffCompleted(str(out_path), hashlib.sha256(data).hexdigest()))
+    """Write the immutable seam file, then read it back and report its hash.
+
+    The read-back is not ceremony: the reported hash is what a promotion
+    records, and a session that has just spent its protocol should prove
+    the file it wrote parses and verifies before it claims a handoff
+    (§spec:measurements-artifact).
+    """
+    written = write(artifact, out_path)
+    verified = verify(out_path)
+    if verified != written:
+        raise RuntimeError(
+            f"{out_path} did not survive its own round trip: written as "
+            f"{written}, read back as {verified}"
+        )
+    emit(HandoffCompleted(str(out_path), verified))
 
 
 def _ramp(
@@ -376,6 +389,10 @@ def characterize(
     patch steps: when it answers true the session stops playback,
     writes no artifact, and raises `SessionCancelled`.
     """
+    # Before the stream opens and before anything is driven: a session
+    # that measures for twenty minutes and then cannot name its output
+    # file has thrown the protocol away.
+    check_seam_path(out_path)
     session_start = clock()
     emit(
         SessionStarted(
@@ -506,6 +523,9 @@ def _characterize(
         # (§spec:spectral-retention). Discarding it at this boundary
         # would be unrecoverable, and keeping it is free.
         spectra=tuple(spectrum(readings[patch.name]) for patch in presented),
+        # The seam file's own rows: what was driven, and what was read.
+        driven_codes=tuple(patch.rgb for patch in presented),
+        readings=tuple(xyz(readings[patch.name]) for patch in presented),
         protocol_name=PROTOCOL_NAME,
         presentation_order=tuple(patch.name for patch in presented),
         per_channel_response=PerChannelResponse(

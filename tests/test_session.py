@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-import yaml
 from bmd_sg.decklink import EOTFType, MockBMDDeckLink, PixelFormatType
+from conftest import projection
 from test_processor import tree
 
 from display_measure import session
@@ -34,7 +34,7 @@ def method_calls(device: MockBMDDeckLink, method: str) -> list[dict[str, Any]]:
 def test_identical_inputs_give_identical_bytes(
     display_artifact: Path, fixed_clock: Clock, tmp_path: Path
 ) -> None:
-    second = tmp_path / "second.yaml"
+    second = tmp_path / "second.csmf"
     doubles_session(second, clock=fixed_clock, settle_seconds=0.0)
     assert second.read_bytes() == display_artifact.read_bytes()
 
@@ -54,7 +54,7 @@ def test_the_random_instrument_is_reachable_and_its_numbers_are_refused(
     check would be used in anger the first time a rig misbehaved at
     2 a.m., which is precisely when the artifact matters most.
     """
-    divergent = tmp_path / "random.yaml"
+    divergent = tmp_path / "random.csmf"
     with pytest.raises(InconsistentSession):
         doubles_session(divergent, clock=fixed_clock, settle_seconds=0.0, seed=0)
     assert not divergent.exists(), "a refused session writes no artifact"
@@ -65,7 +65,7 @@ def test_artifact_measurements_route_sensibly(display_artifact: Path) -> None:
     opening black feeds both the floor and the black level, white
     carries the peak, and the primaries are mutually distinct — the
     relations only the session (not the display model) can prove."""
-    doc = yaml.safe_load(display_artifact.read_text())
+    doc = projection(display_artifact)
     luminance = doc["luminance"]
     assert doc["ambient_floor"] == luminance["black_level"]
     assert luminance["peak_luminance"] / luminance["black_level"] > 100
@@ -103,7 +103,7 @@ def test_session_drives_the_full_protocol_in_presentation_order(
 def test_artifact_records_the_protocol_and_unshuffle_key(
     display_artifact: Path,
 ) -> None:
-    doc = yaml.safe_load(display_artifact.read_text())
+    doc = projection(display_artifact)
     assert doc["protocol"]["name"] == PROTOCOL_NAME
     driven = [p.name for p in presentation_order(protocol_patches(), seed=0)]
     assert doc["protocol"]["presentation_order"] == driven
@@ -156,7 +156,7 @@ def test_hybrid_session_leads_with_the_derivation_rungs(
     """The correction has to exist before any patch can be routed —
     black included — so the rungs it is derived from lead, and black
     follows them still ahead of the shuffle."""
-    doc = yaml.safe_load(hybrid_artifact.read_text())
+    doc = projection(hybrid_artifact)
     order = doc["protocol"]["presentation_order"]
     assert order[:4] == [*DERIVATION_PATCHES, "black"]
     assert sorted(order) == sorted(p.name for p in protocol_patches())
@@ -165,7 +165,7 @@ def test_hybrid_session_leads_with_the_derivation_rungs(
 def test_hybrid_artifact_attributes_every_row_to_an_instrument(
     hybrid_artifact: Path,
 ) -> None:
-    doc = yaml.safe_load(hybrid_artifact.read_text())
+    doc = projection(hybrid_artifact)
     routing = doc["instrument_routing"]
     assert len(routing["sources"]) == len(doc["protocol"]["presentation_order"])
     assert set(routing["sources"]) == {"spectroradiometer", "colorimeter"}
@@ -183,8 +183,8 @@ def test_disciplining_the_colorimeter_reproduces_the_spectro_only_session(
     """The threshold covers the whole ramp, so every held-out row comes
     from the corrected colorimeter — and lands on the values the
     spectro-only session measured (§spec:sessions)."""
-    hybrid = yaml.safe_load(hybrid_artifact.read_text())
-    spectro = yaml.safe_load(display_artifact.read_text())
+    hybrid = projection(hybrid_artifact)
+    spectro = projection(display_artifact)
     sources = hybrid["instrument_routing"]["sources"]
     # Everything but the three derivation rungs, black now included.
     assert sources.count("colorimeter") == len(sources) - 3
@@ -208,7 +208,7 @@ def test_every_row_records_how_its_spectrum_was_obtained(
 ) -> None:
     """The spectroradiometer path measures one for every patch, and the
     artifact says so row by row (§spec:spectral-retention)."""
-    doc = yaml.safe_load(display_artifact.read_text())
+    doc = projection(display_artifact)
     spectra = doc["spectra"]
     assert len(spectra) == len(doc["protocol"]["presentation_order"])
     assert {row["provenance"] for row in spectra} == {"measured"}
@@ -221,7 +221,7 @@ def test_a_routed_hybrid_session_names_all_three_provenances(
     """The split a real rig runs: bright rows measured, dark rows
     reconstructed from the bright reading of the same stimulus, and
     black — which no measured row stands in for — absent."""
-    doc = yaml.safe_load(routed_hybrid_artifact.read_text())
+    doc = projection(routed_hybrid_artifact)
     order = doc["protocol"]["presentation_order"]
     rows = dict(zip(order, doc["spectra"], strict=True))
     assert {row["provenance"] for row in doc["spectra"]} == {
@@ -243,7 +243,7 @@ def test_reconstructed_rows_can_be_excluded_by_an_analysis(
 ) -> None:
     """The Verify criterion: a reader wanting measured spectra alone can
     tell which rows to drop, and why."""
-    doc = yaml.safe_load(routed_hybrid_artifact.read_text())
+    doc = projection(routed_hybrid_artifact)
     measured = [row for row in doc["spectra"] if row["provenance"] == "measured"]
     reconstructed = [
         row for row in doc["spectra"] if row["provenance"] == "reconstructed"
@@ -254,13 +254,13 @@ def test_reconstructed_rows_can_be_excluded_by_an_analysis(
 
 
 def test_single_instrument_sessions_record_no_routing(display_artifact: Path) -> None:
-    assert "instrument_routing" not in yaml.safe_load(display_artifact.read_text())
+    assert "instrument_routing" not in projection(display_artifact)
 
 
 def test_patch_seconds_cover_the_presentation_and_zero_under_fixed_clock(
     display_artifact: Path,
 ) -> None:
-    doc = yaml.safe_load(display_artifact.read_text())
+    doc = projection(display_artifact)
     seconds = doc["protocol"]["patch_seconds"]
     assert len(seconds) == len(doc["protocol"]["presentation_order"])
     # The doubles fixture injects a fixed clock; durations measured by
@@ -275,7 +275,7 @@ def test_a_hybrid_session_reads_black_through_the_colorimeter(
     """Black is the session's most expensive read and the colorimeter is
     the better instrument there (§road:instrument-floors), so the
     derivation rungs lead and black routes like any other dark patch."""
-    doc = yaml.safe_load(hybrid_artifact.read_text())
+    doc = projection(hybrid_artifact)
     order = doc["protocol"]["presentation_order"]
     sources = dict(zip(order, doc["instrument_routing"]["sources"], strict=True))
     assert order[:3] == list(DERIVATION_PATCHES), "the rungs lead a hybrid session"
@@ -287,14 +287,14 @@ def test_a_single_instrument_session_still_opens_on_black(
     display_artifact: Path,
 ) -> None:
     """No derivation to pin, so the order is what protocol 1 drove."""
-    doc = yaml.safe_load(display_artifact.read_text())
+    doc = projection(display_artifact)
     assert doc["protocol"]["presentation_order"][0] == "black"
 
 
 def test_the_ambient_floor_is_the_black_reading_wherever_black_lands(
     hybrid_artifact: Path,
 ) -> None:
-    doc = yaml.safe_load(hybrid_artifact.read_text())
+    doc = projection(hybrid_artifact)
     assert doc["ambient_floor"] == pytest.approx(doc["luminance"]["black_level"])
 
 
@@ -309,7 +309,7 @@ def test_a_display_far_off_its_declared_intensity_refuses_before_the_protocol_ru
     handoff.
     """
     declared = replace(DECLARED_CONTRACT, intensity="1800 nits")
-    out = tmp_path / "refused.yaml"
+    out = tmp_path / "refused.csmf"
     with pytest.raises(ContractViolation) as e:
         doubles_session(out, clock=fixed_clock, settle_seconds=0.0, declared=declared)
     assert "1800" in str(e.value)
@@ -328,7 +328,7 @@ def test_the_level_gate_stops_the_session_at_white(
         pytest.raises(ContractViolation),
     ):
         doubles_session(
-            tmp_path / "refused.yaml",
+            tmp_path / "refused.csmf",
             clock=fixed_clock,
             settle_seconds=0.0,
             declared=declared,
@@ -363,8 +363,8 @@ def test_a_v210_session_measures_the_display_through_the_link(
 ) -> None:
     """Full drive survives the narrow range exactly, so the peak agrees;
     the shadow codes do not, so the ramps are a different measurement."""
-    v210 = yaml.safe_load(v210_run[0].read_text())
-    rgb = yaml.safe_load(display_artifact.read_text())
+    v210 = projection(v210_run[0])
+    rgb = projection(display_artifact)
     assert v210["luminance"]["peak_luminance"] == rgb["luminance"]["peak_luminance"]
     assert response_rows(v210) != response_rows(rgb)
 
@@ -373,8 +373,8 @@ def test_artifacts_over_different_links_are_legibly_different_measurements(
     v210_run: tuple[Path, MockBMDDeckLink], display_artifact: Path
 ) -> None:
     """The one field a loader needs to refuse comparing them silently."""
-    v210 = yaml.safe_load(v210_run[0].read_text())
-    rgb = yaml.safe_load(display_artifact.read_text())
+    v210 = projection(v210_run[0])
+    rgb = projection(display_artifact)
     assert v210["wire_encoding"] != rgb["wire_encoding"]
     driven = presentation_order(protocol_patches(), seed=0)
     assert v210["wire_encoding"]["wire_codes"] == [
@@ -419,7 +419,7 @@ def test_a_v210_session_is_refused_by_a_processor_receiving_the_bench_link(
     monkeypatch.setattr(session, "TesseraProcessor", BenchProcessor)
     with pytest.raises(ContractViolation) as e:
         hardware_session(
-            tmp_path / "v210.yaml",
+            tmp_path / "v210.csmf",
             clock=fixed_clock,
             settle_seconds=0.0,
             processor_host="bench",

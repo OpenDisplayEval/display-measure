@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from bmd_sg.decklink import MockBMDDeckLink
 
-from display_measure.artifact import DECLARED_CONTRACT
+from display_measure.artifact import DECLARED_CONTRACT, verify
 from display_measure.events import (
     Gate,
     GateEvaluated,
@@ -164,7 +164,11 @@ def test_handoff_carries_the_artifact_path_and_its_real_hash(
     handoff = of_type(stream, HandoffCompleted)
     assert len(handoff) == 1
     assert handoff[0].path == str(out)
-    assert handoff[0].sha256 == hashlib.sha256(out.read_bytes()).hexdigest()
+    # The digest is over the canonical projection, not the seam file's
+    # bytes: protobuf guarantees round-trip, not a canonical encoding
+    # (§spec:measurements-artifact).
+    assert handoff[0].sha256 == verify(out)
+    assert handoff[0].sha256 != hashlib.sha256(out.read_bytes()).hexdigest()
 
 
 def test_a_refusal_names_the_gate_and_ends_the_session(
@@ -176,7 +180,7 @@ def test_a_refusal_names_the_gate_and_ends_the_session(
     stream: list[SessionEvent] = []
     with pytest.raises(ContractViolation):
         doubles_session(
-            tmp_path / "refused.yaml",
+            tmp_path / "refused.csmf",
             clock=fixed_clock,
             settle_seconds=0.0,
             declared=replace(DECLARED_CONTRACT, intensity="1800 nits"),
@@ -327,7 +331,7 @@ def test_an_unfit_correction_refuses_under_its_own_gate(
     """The derivation-fitness gate lives inside the instrument, so the
     read is where the session can name it (§spec:session-gates). Without
     the name a consumer sees only that something refused."""
-    out = tmp_path / "unfit.yaml"
+    out = tmp_path / "unfit.csmf"
     stream: list[SessionEvent] = []
     with MockBMDDeckLink(0) as device, pytest.raises(DerivationRefused):
         device._max_frame_history = len(protocol_patches())

@@ -10,10 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from conftest import projection, rows
 from typer.testing import CliRunner
 
 from display_measure import session
+from display_measure.artifact import verify
 from display_measure.cli import app
+from display_measure.protocol import PROTOCOL_NAME
 from display_measure.wire import RGB12, V210
 
 runner = CliRunner()
@@ -57,7 +60,7 @@ def test_help_defers_the_measurement_stack() -> None:
 def test_characterize_wiring_matches_the_session_core(
     display_artifact: Path, tmp_path: Path
 ) -> None:
-    out = tmp_path / "measurements.yaml"
+    out = tmp_path / "measurements.csmf"
     result = runner.invoke(
         app,
         [
@@ -72,6 +75,57 @@ def test_characterize_wiring_matches_the_session_core(
     )
     assert result.exit_code == 0, result.output
     assert out.read_bytes() == display_artifact.read_bytes()
+
+
+def test_characterize_writes_one_seam_file_and_nothing_beside_it(
+    tmp_path: Path,
+) -> None:
+    """The command's output is CSMF and only CSMF: a pipeline with two
+    measurements files of record has none (§spec:measurement-seam). The
+    provenance block carries what CSMF does not model, and the reported
+    hash is the digest of the projection it holds."""
+    out = tmp_path / "measurements.csmf"
+    result = runner.invoke(
+        app,
+        [
+            "characterize",
+            "--out",
+            str(out),
+            "--instrument",
+            "doubles-hybrid",
+            "--settle",
+            "0",
+            "--timestamp",
+            FIXED_TIMESTAMP,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert [path.name for path in tmp_path.iterdir()] == ["measurements.csmf"]
+
+    doc = projection(out)
+    assert doc["protocol"]["name"] == PROTOCOL_NAME
+    assert doc["processor_state"]["eotf"]["type"] == "GAMMA"
+    assert doc["instrument_routing"]["method"] == "four-color-matrix"
+    # Every driven patch is a row, spectral where a spectrum exists.
+    seam_rows = rows(out)
+    assert len(seam_rows) == len(doc["protocol"]["presentation_order"])
+    provenances = {row["provenance"] for row in doc["spectra"]}
+    assert provenances == {"measured", "reconstructed", "absent"}
+    # Self-verifying: the block's digest covers the projection it holds.
+    assert len(verify(out)) == 64
+
+
+def test_characterize_refuses_an_output_path_that_is_not_a_seam_file(
+    tmp_path: Path,
+) -> None:
+    """Refused before anything is driven: a session that measures for
+    twenty minutes and then cannot name its output has thrown the
+    protocol away."""
+    out = tmp_path / "measurements.yaml"
+    result = runner.invoke(app, ["characterize", "--out", str(out), "--settle", "0"])
+    assert result.exit_code == 1
+    assert ".csmf" in plain(result.output)
+    assert not out.exists()
 
 
 def test_help_lists_every_instrument_mode() -> None:
@@ -95,7 +149,7 @@ def test_help_lists_every_wire_encoding() -> None:
 def test_doubles_hybrid_wiring_matches_the_session_core(
     hybrid_artifact: Path, full_ramp_threshold: float, tmp_path: Path
 ) -> None:
-    out = tmp_path / "measurements.yaml"
+    out = tmp_path / "measurements.csmf"
     result = runner.invoke(
         app,
         [
@@ -136,7 +190,7 @@ def test_hardware_modes_reach_the_bench_wiring(
         [
             "characterize",
             "--out",
-            str(tmp_path / "m.yaml"),
+            str(tmp_path / "m.csmf"),
             "--instrument",
             mode,
             "--threshold",
@@ -164,7 +218,7 @@ def test_the_declared_wire_encoding_reaches_the_bench_wiring(
         [
             "characterize",
             "--out",
-            str(tmp_path / "m.yaml"),
+            str(tmp_path / "m.csmf"),
             "--instrument",
             "spectro",
             "--wire",
@@ -176,7 +230,7 @@ def test_the_declared_wire_encoding_reaches_the_bench_wiring(
 
 
 def test_the_doubles_drive_a_v210_session_end_to_end(tmp_path: Path) -> None:
-    out = tmp_path / "v210.yaml"
+    out = tmp_path / "v210.csmf"
     result = runner.invoke(
         app,
         ["characterize", "--out", str(out), "--wire", "v210", "--settle", "0"],
@@ -188,7 +242,7 @@ def test_the_doubles_drive_a_v210_session_end_to_end(tmp_path: Path) -> None:
 def test_characterize_refuses_an_unknown_wire_encoding(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
-        ["characterize", "--out", str(tmp_path / "m.yaml"), "--wire", "r210"],
+        ["characterize", "--out", str(tmp_path / "m.csmf"), "--wire", "r210"],
     )
     assert result.exit_code != 0
 
@@ -199,7 +253,7 @@ def test_characterize_refuses_an_unknown_instrument(tmp_path: Path) -> None:
         [
             "characterize",
             "--out",
-            str(tmp_path / "m.yaml"),
+            str(tmp_path / "m.csmf"),
             "--instrument",
             "guesswork",
         ],
@@ -210,7 +264,7 @@ def test_characterize_refuses_an_unknown_instrument(tmp_path: Path) -> None:
 def test_characterize_refuses_a_negative_threshold(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
-        ["characterize", "--out", str(tmp_path / "m.yaml"), "--threshold", "-1"],
+        ["characterize", "--out", str(tmp_path / "m.csmf"), "--threshold", "-1"],
     )
     assert result.exit_code != 0
 
@@ -221,7 +275,7 @@ def test_characterize_refuses_naive_timestamp(tmp_path: Path) -> None:
         [
             "characterize",
             "--out",
-            str(tmp_path / "m.yaml"),
+            str(tmp_path / "m.csmf"),
             "--timestamp",
             "2026-08-10T12:00:00",
         ],
@@ -252,7 +306,7 @@ def test_an_interrupt_cancels_the_run_and_writes_no_artifact(
     # `display_measure.session` sleeps through the stdlib module, so
     # this is the settle it is about to take. monkeypatch restores it.
     monkeypatch.setattr(time, "sleep", interrupt_on_third)
-    out = tmp_path / "cancelled.yaml"
+    out = tmp_path / "cancelled.csmf"
     result = runner.invoke(
         app,
         ["characterize", "--out", str(out), "--settle", "0"],
@@ -273,7 +327,7 @@ def test_the_interrupt_handler_is_removed_when_the_run_ends(
         [
             "characterize",
             "--out",
-            str(tmp_path / "m.yaml"),
+            str(tmp_path / "m.csmf"),
             "--settle",
             "0",
             "--timestamp",

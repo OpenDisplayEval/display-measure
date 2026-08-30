@@ -48,7 +48,8 @@ dependencies = [
     # the hash pypixelpack tags as v0.1.0 is what travels with the wheel.
     "pypixelpack @ git+https://github.com/Fuse-Technical-Group/pypixelpack@82e249e4531df297e0b81099e2b24eb08190a8d6",
     # The contract audit reads the show manifest's signal_contract
-    # (§spec:session-gates). The artifact writer still emits YAML by hand.
+    # (§spec:session-gates). The artifact renders its hashing projection
+    # as YAML by hand, and does not parse it.
     "pyyaml>=6.0.1",
     "typer>=0.16,<0.17",
 ]

@@ -8,6 +8,18 @@ response, and routing sections are optional: a session fills the ones
 it measured, and ocio-display-gen's loader tolerates the rest being
 absent.
 
+The seam file
+-------------
+The artifact is written as CSMF, colour-specio's measurement file
+(§spec:measurement-seam). CSMF carries the rows — tristimulus, and the
+spectrum behind each one — and everything it does not model rides in
+the provenance block its reserved `ancillary` field holds: the declared
+contract, the attested panel state, the protocol name and driven order,
+the instrument identity, the processor snapshot, the wire encoding and
+the correction matrix. One file, because a pipeline with two
+measurements files of record has none. Existing CSMF readers open it
+and ignore the field.
+
 Determinism seam
 ----------------
 §spec:artifact-chain requires timestamps in the artifact and also makes
@@ -22,12 +34,17 @@ requested random instrument involves an RNG, seeded at wiring time.
 
 Rendering is deterministic by construction: fixed key order, fixed
 9-decimal float formatting (below any instrument's repeatability),
-LF line endings, UTF-8.
+LF line endings, UTF-8. The rendering is no longer written to disk as
+an artifact: it is the hashing projection, and the digest over it is
+what a promotion records. Protobuf guarantees round-trip rather than a
+canonical encoding, so a digest over the seam file's own bytes would
+rotate on a dependency upgrade and every promoted artifact would stop
+verifying.
 """
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # A wire identifier, not a package name. It outlived the repository it
@@ -39,6 +56,19 @@ from pathlib import Path
 # of one display over different links apart; a schema-1 artifact
 # implied the bench's 12-bit RGB link.
 SCHEMA = "color-wrangler/measurements/2"
+
+# The seam file is CSMF (§spec:measurement-seam), and colour-specio's
+# loader opens no other suffix.
+SEAM_SUFFIX = ".csmf"
+
+# The provenance block riding in CSMF's reserved `ancillary` field: an
+# envelope naming the digest, the marker, then the projection. Its own
+# wire identifier, because a reader dispatches on it exactly as it does
+# on SCHEMA.
+ANCILLARY_SCHEMA = "color-wrangler/measurements-provenance/1"
+# A YAML document separator, so the block is a two-document stream and a
+# reader can take it apart with a parser rather than a string search.
+PROJECTION_MARKER = "---"
 
 # Nine decimals sits below any instrument's repeatability while keeping
 # the rendered bytes independent of Python's float repr.
@@ -457,6 +487,19 @@ class MeasurementsArtifact:
     # rather than leaving the block out: "no spectrum" is a fact about
     # the reading, and silence is not.
     spectra: tuple[Spectrum, ...] | None = None
+    # The absolute XYZ (cd/m²) behind each driven patch, presentation
+    # order. The response sections above are the same readings sorted
+    # into protocol order, which is the shape a config generator reads;
+    # these are the seam file's own rows, and recording them is what
+    # lets the projection's digest cover the tristimulus the file
+    # carries.
+    readings: tuple[tuple[float, float, float], ...] | None = None
+    # The protocol code values driven for each patch, presentation
+    # order. Recorded rather than looked up from the protocol's name: a
+    # reader should not have to own the patch table to know what was
+    # driven, and `wire_codes` records only what the link carried, which
+    # over a YCbCr link is not an RGB triple at all.
+    driven_codes: tuple[tuple[int, int, int], ...] | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -475,6 +518,8 @@ class MeasurementsArtifact:
             ("patch_seconds", self.patch_seconds),
             ("wire_codes", self.wire_codes),
             ("spectra", self.spectra),
+            ("readings", self.readings),
+            ("driven_codes", self.driven_codes),
             ("sources", None if routing is None else routing.sources),
         ):
             if values is not None and (
@@ -564,6 +609,53 @@ def _encoding_lines(
             *(f"    - [{a}, {b}, {c}]" for a, b, c in wire_codes),
         ]
     return [*lines, ""]
+
+
+def _protocol_lines(artifact: MeasurementsArtifact) -> list[str]:
+    """The patch protocol and what it drove, or nothing for a session
+    that drove none."""
+    if artifact.protocol_name is None or artifact.presentation_order is None:
+        return []
+    lines = [
+        "# Patch protocol (MEASUREMENT.md, versioned with the tool).",
+        "# presentation_order is the unshuffle key: patch names in the",
+        "# order driven (§spec:sessions).",
+        "protocol:",
+        f'  name: "{artifact.protocol_name}"',
+        "  presentation_order:",
+        *(f'    - "{name}"' for name in artifact.presentation_order),
+    ]
+    if artifact.patch_seconds is not None:
+        seconds = ", ".join(_fmt(s) for s in artifact.patch_seconds)
+        lines += [
+            "  # Elapsed seconds per patch (drive through read), same",
+            "  # order as presentation_order; session-clock derived.",
+            f"  patch_seconds: [{seconds}]",
+        ]
+    if artifact.driven_codes is not None:
+        lines += [
+            "  # The protocol code values driven per patch, same order.",
+            "  driven_codes:",
+            *(f"    - [{r}, {g}, {b}]" for r, g, b in artifact.driven_codes),
+        ]
+    return [*lines, ""]
+
+
+def _row_lines(artifact: MeasurementsArtifact) -> list[str]:
+    """The seam file's own rows: what was read, and how its spectrum came."""
+    lines = []
+    if artifact.readings is not None:
+        lines += [
+            "# The absolute XYZ (cd/m²) read for each driven patch, in",
+            "# presentation order — the seam file's own rows. The response",
+            "# sections below are the same readings in protocol order.",
+            "readings:",
+            *(f"  - {_fmt_xyz(row)}" for row in artifact.readings),
+            "",
+        ]
+    if artifact.spectra is not None:
+        lines += _spectra_lines(artifact.spectra)
+    return lines
 
 
 def _spectra_lines(spectra: tuple[Spectrum, ...]) -> list[str]:
@@ -674,26 +766,8 @@ def render(artifact: MeasurementsArtifact) -> str:
         "",
         *_encoding_lines(artifact.wire_encoding, artifact.wire_codes),
     ]
-    if artifact.protocol_name is not None and artifact.presentation_order is not None:
-        lines += [
-            "# Patch protocol (MEASUREMENT.md, versioned with the tool).",
-            "# presentation_order is the unshuffle key: patch names in the",
-            "# order driven (§spec:sessions).",
-            "protocol:",
-            f'  name: "{artifact.protocol_name}"',
-            "  presentation_order:",
-            *(f'    - "{name}"' for name in artifact.presentation_order),
-        ]
-        if artifact.patch_seconds is not None:
-            seconds = ", ".join(_fmt(s) for s in artifact.patch_seconds)
-            lines += [
-                "  # Elapsed seconds per patch (drive through read), same",
-                "  # order as presentation_order; session-clock derived.",
-                f"  patch_seconds: [{seconds}]",
-            ]
-        lines += [""]
-    if artifact.spectra is not None:
-        lines += _spectra_lines(artifact.spectra)
+    lines += _protocol_lines(artifact)
+    lines += _row_lines(artifact)
     if artifact.instrument_routing is not None:
         lines += _routing_lines(artifact.instrument_routing)
     if artifact.per_channel_response is not None:
@@ -735,14 +809,253 @@ def render(artifact: MeasurementsArtifact) -> str:
     return "\n".join(lines)
 
 
-def write(artifact: MeasurementsArtifact, path: Path) -> bytes:
-    """Write the artifact to `path` (refusing to overwrite); return its bytes.
+def digest(projection: str) -> str:
+    """The artifact's sha256, over the canonical projection.
+
+    Not over the seam file's bytes: protobuf guarantees round-trip, not
+    a canonical encoding, so a digest over those would rotate on a
+    dependency upgrade and every promoted artifact would stop verifying
+    (§spec:measurements-artifact). The rendering is canonical by
+    construction — fixed key order, fixed nine-decimal floats, LF,
+    UTF-8 — so a re-serialized file with identical content still
+    verifies.
+    """
+    return hashlib.sha256(projection.encode("utf-8")).hexdigest()
+
+
+def provenance_block(artifact: MeasurementsArtifact) -> bytes:
+    """The bytes the seam file's ancillary field carries.
+
+    Two YAML documents: an envelope naming the digest, then the
+    canonical projection it covers — everything CSMF does not model,
+    which is the declared contract, the attested panel state, the
+    protocol name and driven order, the instrument identity, the
+    processor snapshot, the wire encoding and the correction matrix.
+    specio neither interprets nor validates these bytes, so an existing
+    CSMF reader opens the file and ignores them.
+
+    The projection rides verbatim rather than being reduced to the
+    fields, because the projection *is* their canonical serialization:
+    carrying it twice, once as data and once as the hashing basis,
+    would be two records that can disagree.
+    """
+    projection = render(artifact)
+    envelope = "\n".join(
+        [
+            "# Provenance for the CSMF file this rides in",
+            "# (§spec:measurements-artifact). Everything below the marker",
+            "# is the artifact's canonical projection; projection_sha256",
+            "# is its digest, and the promotion hash of this measurement.",
+            f'schema: "{ANCILLARY_SCHEMA}"',
+            f'projection_sha256: "{digest(projection)}"',
+            PROJECTION_MARKER,
+            "",
+        ]
+    )
+    return (envelope + projection).encode("utf-8")
+
+
+def carried_projection(ancillary: bytes) -> tuple[str, str]:
+    """The digest recorded in a provenance block and the projection it covers.
+
+    Raises ValueError when the bytes are not a provenance block this
+    layer wrote.
+    """
+    text = ancillary.decode("utf-8")
+    marker = f"\n{PROJECTION_MARKER}\n"
+    envelope, separator, projection = text.partition(marker)
+    if not separator:
+        raise ValueError(
+            "the seam file's ancillary field carries no provenance block: "
+            f"no {PROJECTION_MARKER!r} marker separating the envelope from "
+            "the projection"
+        )
+    for line in envelope.splitlines():
+        if line.startswith("projection_sha256:"):
+            return line.split('"')[1], projection
+    raise ValueError("the provenance block records no projection_sha256")
+
+
+def verify(path: Path) -> str:
+    """Re-read the seam file at `path` and return its verified digest.
+
+    The artifact is self-verifying: the digest covers the projection the
+    provenance block carries, so a reader recomputes it from the file
+    rather than trusting the bytes it was handed. Raises ValueError when
+    the file's own record disagrees with itself.
+    """
+    from specio.serialization.csmf import load_csmf_file
+
+    loaded = load_csmf_file(path)
+    recorded, projection = carried_projection(loaded.ancillary)
+    recomputed = digest(projection)
+    if recomputed != recorded:
+        raise ValueError(
+            f"{path} does not verify: its provenance block records "
+            f"{recorded} and its projection digests to {recomputed}"
+        )
+    rows = len(loaded.measurements)
+    order = projection.count('\n    - "')
+    if order and rows != order:
+        raise ValueError(
+            f"{path} does not verify: it carries {rows} measurement rows "
+            f"against {order} patches in the driven order"
+        )
+    return recomputed
+
+
+def write(artifact: MeasurementsArtifact, path: Path) -> str:
+    """Write the seam file at `path`; return its digest.
+
+    One file at the seam (§spec:measurement-seam): CSMF carrying the
+    spectra and the tristimulus, with everything CSMF does not model in
+    the provenance block its reserved ancillary field holds. CSMF
+    replaced the YAML rendering rather than joining it, because a
+    pipeline with two measurements files of record has none — the
+    renderer stayed as the hashing projection.
 
     The artifact is immutable once written (§spec:artifact-chain), so an
     existing file at `path` raises FileExistsError rather than being
-    replaced.
+    replaced, and a path that is not a `.csmf` raises ValueError.
     """
-    data = render(artifact).encode("utf-8")
+    check_seam_path(path)
+    if artifact.readings is None:
+        raise ValueError(
+            "a seam file carries the session's rows and this artifact "
+            "records none; readings is what CSMF is a file of"
+        )
     with path.open("xb") as f:
-        f.write(data)
-    return data
+        f.write(_seam_bytes(artifact))
+    return digest(render(artifact))
+
+
+def check_seam_path(path: Path) -> None:
+    """Refuse a path colour-specio's loader would not open.
+
+    Checked at the top of a session as well as here: a session that
+    spends twenty minutes measuring and then cannot name its output
+    file has thrown the protocol away.
+    """
+    if path.suffix != SEAM_SUFFIX:
+        raise ValueError(
+            f"the measurements seam file is CSMF, so {path} needs the "
+            f"{SEAM_SUFFIX} suffix; colour-specio's loader opens no other"
+        )
+
+
+def _seam_bytes(artifact: MeasurementsArtifact) -> bytes:
+    """The CSMF file's bytes.
+
+    Deferred imports: colour-specio drags colour and scipy behind it,
+    which no `--help` and no session before its handoff needs.
+    """
+    import numpy as np
+    from specio.serialization.csmf import (
+        CSMF_Data,
+        CSMF_Metadata,
+        csmf_data_to_buffer,
+    )
+
+    rows = _measurement_rows(artifact)
+    data = CSMF_Data(
+        test_colors=np.asarray(artifact.driven_codes or (), dtype=np.int64),
+        # The rows are already in driven order, so each indexes itself.
+        order=list(range(len(rows))),
+        measurements=np.asarray(rows, dtype=object),
+        metadata=CSMF_Metadata(
+            notes=artifact.protocol_name,
+            location=None,
+            author=None,
+            software="display-measure",
+        ),
+        ancillary=provenance_block(artifact),
+    )
+    serialized: bytes = csmf_data_to_buffer(data).SerializeToString()
+    return serialized
+
+
+# colour-specio reports an instrument's integration time per reading and
+# this layer does not carry one: the session records elapsed seconds per
+# patch instead, which is drive through read, not exposure. Written as
+# zero rather than invented.
+UNKNOWN_EXPOSURE = 0.0
+
+
+def _row_instrument(artifact: MeasurementsArtifact, index: int) -> str:
+    """The instrument behind row `index`, as CSMF names one."""
+    routing = artifact.instrument_routing
+    who = artifact.instrument
+    if routing is not None:
+        who = (
+            routing.spectroradiometer
+            if routing.sources[index] == SOURCE_SPECTRORADIOMETER
+            else routing.colorimeter
+        )
+    return f"{who.manufacturer} {who.model} {who.serial_number}"
+
+
+def _row_times(artifact: MeasurementsArtifact, count: int) -> list[datetime]:
+    """When each row was read, from the injected session clock.
+
+    Derived rather than stamped at write time, so the seam file stays
+    byte-deterministic under a fixed clock — colour-specio's measurement
+    types otherwise default their timestamp to `datetime.now`.
+    """
+    elapsed = 0.0
+    times = []
+    for index in range(count):
+        if artifact.patch_seconds is not None:
+            elapsed += artifact.patch_seconds[index]
+        times.append(artifact.session_start + timedelta(seconds=elapsed))
+    return times
+
+
+def _measurement_rows(artifact: MeasurementsArtifact) -> list[object]:
+    """One CSMF row per driven patch, spectral where a spectrum exists.
+
+    A row's tristimulus is always the one the session recorded, never
+    the integral of the spectrum beside it: a reconstructed spectrum
+    carries its anchor's chromaticity by construction, and overwriting
+    the measured value with it would launder an estimate into a
+    measurement. The derived fields colour-specio computes — CCT,
+    dominant wavelength, purity — describe the spectrum, which for a
+    reconstruction is what they are about.
+    """
+    import numpy as np
+    from colour import SpectralDistribution
+    from specio.common import ColorimeterMeasurement, SPDMeasurement
+
+    readings = artifact.readings or ()
+    spectra = artifact.spectra or (ABSENT_SPECTRUM,) * len(readings)
+    names = artifact.presentation_order or tuple(
+        str(index) for index in range(len(readings))
+    )
+    times = _row_times(artifact, len(readings))
+    rows: list[object] = []
+    for index, (xyz, spectrum) in enumerate(zip(readings, spectra, strict=True)):
+        instrument = _row_instrument(artifact, index)
+        row: SPDMeasurement | ColorimeterMeasurement
+        if spectrum.provenance == SPECTRUM_ABSENT:
+            row = ColorimeterMeasurement(
+                XYZ=np.asarray(xyz),
+                exposure=UNKNOWN_EXPOSURE,
+                device_id=instrument,
+            )
+        else:
+            row = SPDMeasurement(
+                spd=SpectralDistribution(
+                    np.asarray(spectrum.values),
+                    np.asarray(spectrum.wavelengths),
+                    # Named for the patch. colour's default name embeds
+                    # the object's id, which would put an address in the
+                    # file and cost byte-determinism.
+                    name=names[index],
+                ),
+                exposure=UNKNOWN_EXPOSURE,
+                spectrometer_id=instrument,
+            )
+            row.XYZ = np.asarray(xyz)
+            row.xy = np.asarray(xyz[:2]) / sum(xyz)
+        row.time = times[index]
+        rows.append(row)
+    return rows

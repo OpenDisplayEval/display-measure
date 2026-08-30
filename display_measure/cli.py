@@ -131,7 +131,10 @@ def characterize(
     out: Path = typer.Option(
         ...,
         "--out",
-        help="Path for the measurements artifact (refuses to overwrite).",
+        help=(
+            "Path for the measurements seam file, a .csmf carrying the "
+            "spectra and the provenance block (refuses to overwrite)."
+        ),
     ),
     instrument: InstrumentChoice = typer.Option(
         InstrumentChoice.DOUBLES,
@@ -283,6 +286,10 @@ def characterize(
                 )
     except FileExistsError as e:
         typer.echo(f"Error: {e} — measurements artifacts are immutable", err=True)
+        raise typer.Exit(1) from e
+    except ValueError as e:
+        # The seam-file suffix, refused before anything is driven.
+        typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from e
     except (ContractViolation, DerivationRefused) as e:
         typer.echo(f"Refused: {e}", err=True)
