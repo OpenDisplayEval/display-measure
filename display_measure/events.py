@@ -85,6 +85,10 @@ class Gate(StrEnum):
     # it: a ramp is not a ramp until it is measured. It refuses the
     # artifact, not the session's time (§road:session-consistency).
     SELF_CONSISTENCY = "self-consistency"
+    # Driven, not read: the processor cannot report how it reads a link's
+    # range on every link, so the session measures it before the protocol
+    # (§spec:measure-sessions).
+    WIRE_RANGE = "wire-range"
 
 
 class GateVerdict(StrEnum):

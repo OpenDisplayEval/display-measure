@@ -135,6 +135,10 @@ def test_every_gate_the_session_holds_reports_an_outcome(
     }
     assert verdicts == {
         Gate.CONTRACT_AUDIT: GateVerdict.PASS,
+        # Driven rather than read, and driven before the protocol: every
+        # patch after it is measured through whatever it establishes
+        # (§spec:measure-sessions).
+        Gate.WIRE_RANGE: GateVerdict.PASS,
         Gate.AMBIENT: GateVerdict.STUB,
         Gate.OUTPUT_LEVEL: GateVerdict.PASS,
         # The only gate that resolves after the protocol: a ramp is not a
@@ -349,3 +353,23 @@ def test_an_unfit_correction_refuses_under_its_own_gate(
     assert [event.gate for event in refusals] == [Gate.DERIVATION_FITNESS]
     assert of_type(tuple(stream), SessionEnded)[0].outcome == Outcome.REFUSED
     assert not out.exists(), "a refused session writes no artifact"
+
+
+def test_the_wire_range_gate_runs_before_the_first_patch(
+    display_stream: tuple[SessionEvent, ...],
+) -> None:
+    """Its verdict conditions every reading that follows it.
+
+    A processor carrying codes the declaration says are not there has
+    shifted the whole response; learning that after 72 patches costs the
+    session.
+    """
+    gate = next(
+        i
+        for i, e in enumerate(display_stream)
+        if isinstance(e, GateEvaluated) and e.gate is Gate.WIRE_RANGE
+    )
+    first_patch = next(
+        i for i, e in enumerate(display_stream) if isinstance(e, PatchStarted)
+    )
+    assert gate < first_patch

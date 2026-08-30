@@ -112,7 +112,13 @@ from display_measure.protocol import (
     protocol_patches,
 )
 from display_measure.session_log import log_events
-from display_measure.wire import RGB12, encode_pixel
+from display_measure.wire import (
+    RGB12,
+    encode_pixel,
+    expects_clipping,
+    range_probe_patches,
+    range_probe_verdict,
+)
 
 __all__ = [
     "Clock",
@@ -284,6 +290,54 @@ def _setup_drive(device: PatchDrive, encoding: WireEncoding, emit: EventSink) ->
     # The enum names, not the enums: an event crossing a wire should
     # not drag bmd-signal-gen in behind it.
     emit(PlaybackStarted(packed.name, EOTFType.SDR.name))
+
+
+def _probe_wire_range(
+    device: PatchDrive,
+    instrument: Instrument,
+    encoding: WireEncoding,
+    settle_seconds: float,
+    emit: EventSink,
+) -> None:
+    """Measure how the processor reads the link's code span, and refuse a
+    reading that contradicts the declaration (§spec:measure-sessions).
+
+    Runs before the protocol because every patch after it is measured
+    through whatever this establishes: a processor carrying codes the
+    declaration says are not there has shifted the whole response, and
+    finding that out at the end costs the session.
+    """
+    patches = range_probe_patches(encoding)
+    if not patches:
+        return
+    luminances: dict[str, float] = {}
+    for patch in patches:
+        device.display_frame(_frame(encoding, patch))
+        time.sleep(settle_seconds)
+        # `instrument.measure()`, never `_read`: a disciplined instrument
+        # routes and records by patch name, and a probe patch is not one
+        # of the protocol's — attributing it would put a reading in the
+        # artifact's per-patch arrays that no driven patch matches.
+        luminances[patch.name] = luminance(instrument.measure())
+    agrees, why = range_probe_verdict(
+        luminances, expect_clipped=expects_clipping(encoding)
+    )
+    detail = (
+        f"{encoding.layout} declares {encoding.levels} range; "
+        f"the processor {'reads it' if agrees else 'does not'} — {why}"
+    )
+    emit(
+        GateEvaluated(
+            Gate.WIRE_RANGE,
+            GateVerdict.PASS if agrees else GateVerdict.REFUSED,
+            detail,
+        )
+    )
+    if not agrees:
+        raise ContractViolation(
+            "the processor does not read the link's declared code span, so "
+            f"every patch after this one would be measured through that: {detail}"
+        )
 
 
 def _drive(
@@ -459,6 +513,7 @@ def _characterize(
     _setup_drive(device, encoding, emit)
     if wire_check is not None:
         wire_check()
+    _probe_wire_range(device, instrument, encoding, settle_seconds, emit)
 
     # The session opens on black — presentation_order pins it first;
     # the ambient gate consumes that opening reading and black_level

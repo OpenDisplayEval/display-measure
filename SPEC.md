@@ -94,6 +94,14 @@ declaration against whatever last drove the link. The gate runs after
 the drive is up, at the cost of a refusal arriving with the rig already
 open — cheaper than a verdict that depends on what ran previously.
 
+**The range probe is a gate, driven before the protocol.** Its verdict
+conditions every reading after it, so it runs first: a processor
+carrying codes the declaration says are not there has shifted the whole
+response, and finding that out at the end costs the session rather than
+six patches. It is read without patch attribution, because a probe patch
+is not one of the protocol's and its reading belongs in no per-patch
+array.
+
 **The range probe measures what the link cannot report.** Patches
 authored in RGB can only encode to codes inside the declared span, so
 none of them distinguishes a processor reading a narrow link as full
