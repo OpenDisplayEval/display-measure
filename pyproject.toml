@@ -79,6 +79,14 @@ packages = ["display_measure"]
 
 [tool.uv.sources]
 bmd-signal-generator = { git = "https://github.com/OpenLEDEval/bmd-signal-gen", tag = "v0.2.1" }
+# The seam file's format is colour-specio's (§spec:scope), so the two gaps
+# that block it are fixed there rather than worked around here:
+# `load_csmf_file` read only the legacy spectral list and silently dropped a
+# hybrid session's colorimetric rows, and the schema's reserved `ancillary`
+# field was unreachable from the Python surface. Commit pin, not a branch —
+# a branch head moves. Reverts to the released `==0.4.2a0` pin above once
+# the upstream PR merges.
+colour-specio = { git = "https://github.com/repentsinner/colour-specio", rev = "981d48627c7b2a02e14897500fa1a67da8f61c8a" }
 
 [dependency-groups]
 dev = [
