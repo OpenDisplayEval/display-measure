@@ -125,6 +125,28 @@ def test_input_metadata_matching_the_wire_format_passes() -> None:
     audit_wire_format(DECLARED_WIRE, live)
 
 
+def test_a_v210_declaration_is_refused_unless_the_processor_sees_10bit_ycbcr() -> None:
+    """The bench link is 12-bit RGB; a session declaring v210 over it
+    would bake the processor's own decode into the measurement."""
+    from display_measure.wire import V210
+
+    declared = WireFormat.for_encoding(V210)
+    bench = InputMetadata(
+        bit_depth=12, sampling="rgb", hdr_format="standard-dynamic-range"
+    )
+    with pytest.raises(ContractViolation) as e:
+        audit_wire_format(declared, bench)
+    message = str(e.value)
+    assert "10-bit" in message and "12-bit" in message
+    assert "ycbcr" in message and "rgb" in message
+    audit_wire_format(
+        declared,
+        InputMetadata(
+            bit_depth=10, sampling="ycbcr", hdr_format="standard-dynamic-range"
+        ),
+    )
+
+
 def test_pq_signalling_under_an_sdr_contract_refuses() -> None:
     live = InputMetadata(bit_depth=12, sampling="rgb", hdr_format="pq")
     with pytest.raises(ContractViolation) as e:

@@ -26,8 +26,9 @@ import numpy as np
 import numpy.typing as npt
 from bmd_sg.decklink import PixelFormatType
 
-from display_measure.artifact import DECLARED_CONTRACT
+from display_measure.artifact import DECLARED_CONTRACT, WireEncoding
 from display_measure.instrument import XYZReading
+from display_measure.wire import RGB12, decode_pixel, pixel_format
 
 # Display model constants copied from ocio-display-gen's shipped sample
 # measurements (measurements/ftg_stage1_20240115.yaml — a ROE Black
@@ -104,11 +105,20 @@ class PlausibleDisplay:
     model = "PlausibleDisplay"
     serial_number = "ftg_stage1_20240115"
 
-    def __init__(self, device: FrameSource, *, ambient: float = 0.0) -> None:
-        """`ambient` is reflected-light luminance (cd/m²) added to every
-        reading — the knob §road:session-gates' ambient budget refusal
-        exercises without hardware. Default 0: a dark room."""
+    def __init__(
+        self,
+        device: FrameSource,
+        *,
+        encoding: WireEncoding = RGB12,
+        ambient: float = 0.0,
+    ) -> None:
+        """`encoding` is the link the display decodes — the one the
+        session declares, since the wire-format gate holds the processor
+        to it. `ambient` is reflected-light luminance (cd/m²) added to
+        every reading — the knob §road:session-gates' ambient budget
+        refusal exercises without hardware. Default 0: a dark room."""
         self._device = device
+        self._encoding = encoding
         self._ambient_xyz = _unit_xyz(WHITE_XY) * ambient
 
     def measure(self) -> XYZReading:
@@ -117,10 +127,17 @@ class PlausibleDisplay:
             raise RuntimeError(
                 "PlausibleDisplay cannot measure: no frame has been driven"
             )
-        full_drive = 2**self._device.pixel_format.bit_depth - 1
+        packed = self._device.pixel_format
+        if packed is not pixel_format(self._encoding):
+            # A double that reads one format out of a device packing
+            # another disagrees with its device, which is worse than none.
+            raise RuntimeError(
+                f"PlausibleDisplay decodes {self._encoding.layout} but the "
+                f"device packs {packed.name}"
+            )
         # A spot instrument aimed at the display center.
         spot = frame[frame.shape[0] // 2, frame.shape[1] // 2]
-        linear = (spot.astype(np.float64) / full_drive) ** DECODE_GAMMA
+        linear = decode_pixel(self._encoding, spot) ** DECODE_GAMMA
         return XYZReading(XYZ=self._ambient_xyz + _BLACK_XYZ + _PRIMARY_XYZ @ linear)
 
 

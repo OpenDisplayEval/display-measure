@@ -53,6 +53,7 @@ from display_measure.artifact import (
     PerChannelResponse,
     ProcessorStateSnapshot,
     ResponsePoint,
+    WireEncoding,
     write,
 )
 from display_measure.consistency import InconsistentSession
@@ -102,7 +103,6 @@ from display_measure.protocol import (
     BLACK_PATCH,
     FULL_DRIVE,
     OPENING_PINS,
-    PATCH_PIXEL_FORMAT,
     PROTOCOL_NAME,
     WHITE_PATCH,
     Patch,
@@ -110,10 +110,9 @@ from display_measure.protocol import (
     protocol_patches,
 )
 from display_measure.session_log import log_events
+from display_measure.wire import RGB12, encode_pixel, pixel_format
 
 __all__ = [
-    "FULL_DRIVE",
-    "PATCH_PIXEL_FORMAT",
     "Clock",
     "Instrument",
     "InstrumentReading",
@@ -126,15 +125,6 @@ __all__ = [
 # The DeckLink a hardware session drives. One card on the bench rig;
 # multi-device selection waits for a session that needs it.
 DECKLINK_INDEX = 0
-
-# The link the session declares, derived from what `_setup_drive` sets so the
-# declaration cannot drift from the drive (§spec:signal-contract). Compared
-# against the processor's own input metadata by the wire-format gate.
-DECLARED_WIRE_FORMAT = WireFormat(
-    bit_depth=PATCH_PIXEL_FORMAT.bit_depth,
-    sampling="rgb",
-    hdr_format="standard-dynamic-range",
-)
 
 # Pre-session narration only — instrument discovery and the processor
 # pre-audit run before `characterize` opens the event stream, so there
@@ -167,8 +157,14 @@ class PatchDrive(DeckLinkOutput, Protocol):
     def pixel_format(self, pixel_format_type: PixelFormatType) -> None: ...
 
 
-def _frame(rgb: tuple[int, int, int]) -> npt.NDArray[np.uint16]:
-    return np.full((FRAME_HEIGHT, FRAME_WIDTH, 3), rgb, dtype=np.uint16)
+def _frame(encoding: WireEncoding, rgb: tuple[int, int, int]) -> npt.NDArray[np.uint16]:
+    """A flat field of the codes the wire carries for `rgb`.
+
+    One pixel is encoded and broadcast: a patch is a flat field, so
+    converting 1920x1080 of it per patch would buy nothing.
+    """
+    codes = encode_pixel(encoding, rgb)
+    return np.full((FRAME_HEIGHT, FRAME_WIDTH, 3), codes, dtype=np.uint16)
 
 
 def never_cancelled() -> bool:
@@ -243,24 +239,32 @@ def ambient_gate(reading: InstrumentReading) -> float:
     return luminance(reading)
 
 
-def _setup_drive(device: PatchDrive, emit: EventSink) -> None:
+def _setup_drive(device: PatchDrive, encoding: WireEncoding, emit: EventSink) -> None:
     """Declare pixel format and EOTF signaling, then start playback.
 
-    bmd-signal-gen defaults to PQ InfoFrames, which would fault an
-    SDR-contract display, so the session signals explicitly
-    (§spec:sessions).
+    The pixel format is the declared encoding's, so the wire the gate
+    held the processor to is the wire the device packs. bmd-signal-gen
+    defaults to PQ InfoFrames, which would fault an SDR-contract
+    display, so the session signals explicitly (§spec:sessions).
     """
-    device.pixel_format = PATCH_PIXEL_FORMAT
+    packed = pixel_format(encoding)
+    device.pixel_format = packed
     device.set_hdr_metadata(HDRMetadata(eotf=EOTFType.SDR))
     device.start_playback()
     # The enum names, not the enums: an event crossing a wire should
     # not drag bmd-signal-gen in behind it.
-    emit(PlaybackStarted(PATCH_PIXEL_FORMAT.name, EOTFType.SDR.name))
+    emit(PlaybackStarted(packed.name, EOTFType.SDR.name))
 
 
-def _drive(device: PatchDrive, patch: Patch, index: int, emit: EventSink) -> None:
+def _drive(
+    device: PatchDrive,
+    encoding: WireEncoding,
+    patch: Patch,
+    index: int,
+    emit: EventSink,
+) -> None:
     emit(PatchStarted(index, patch.name, patch.rgb))
-    device.display_frame(_frame(patch.rgb))
+    device.display_frame(_frame(encoding, patch.rgb))
 
 
 def _settle(seconds: float, index: int, emit: EventSink) -> None:
@@ -326,6 +330,7 @@ def characterize(
     clock: Clock,
     settle_seconds: float,
     seed: int = 0,
+    encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
     reading: ProcessorStateSnapshot | None = None,
     emit: EventSink = log_events,
@@ -337,7 +342,9 @@ def characterize(
     presentation order (`seed` keys the shuffle and nothing else —
     instrument behavior is the caller's wiring), reads each patch with
     `instrument`, and hands off the immutable artifact at `out_path`.
-    Raises FileExistsError rather than overwriting.
+    Raises FileExistsError rather than overwriting. `encoding` is the
+    link the patches ride to the device; the caller has already held
+    the processor to it where there is one to hold.
 
     An instrument that also satisfies `DisciplinedInstrument` gets the
     patches its correction needs driven first and reports its routing
@@ -366,6 +373,7 @@ def characterize(
             clock=clock,
             settle_seconds=settle_seconds,
             seed=seed,
+            encoding=encoding,
             declared=declared,
             reading=reading,
             emit=emit,
@@ -382,6 +390,7 @@ def _characterize(
     clock: Clock,
     settle_seconds: float,
     seed: int,
+    encoding: WireEncoding,
     declared: ProcessorStateSnapshot,
     reading: ProcessorStateSnapshot | None,
     emit: EventSink,
@@ -414,7 +423,7 @@ def _characterize(
             )
         )
 
-    _setup_drive(device, emit)
+    _setup_drive(device, encoding, emit)
 
     # The session opens on black — presentation_order pins it first;
     # the ambient gate consumes that opening reading and black_level
@@ -438,6 +447,7 @@ def _characterize(
     try:
         readings, patch_seconds, ambient_floor = _drive_presentation(
             device,
+            encoding,
             instrument,
             presented,
             clock=clock,
@@ -554,6 +564,7 @@ def _routed_rows(
 
 def _drive_presentation(
     device: PatchDrive,
+    encoding: WireEncoding,
     instrument: Instrument,
     presented: tuple[Patch, ...],
     *,
@@ -584,7 +595,7 @@ def _drive_presentation(
                 "no artifact written"
             )
         began = clock()
-        _drive(device, patch, index, emit)
+        _drive(device, encoding, patch, index, emit)
         _settle(settle_seconds, index, emit)
         # A disciplined instrument derives its correction from the
         # rungs it reads first, and refuses here when that correction
@@ -655,6 +666,7 @@ def doubles_session(
     seed: int | None = None,
     hybrid: bool = False,
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
+    encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
     emit: EventSink = log_events,
     cancelled: Cancelled = never_cancelled,
@@ -662,14 +674,15 @@ def doubles_session(
     """Run one characterize session against the device doubles.
 
     The default instrument is the plausible display (rationale and model in
-    :mod:`display_measure.plausible_display`). Passing `seed` selects
-    colour-specio's random virtual spectrometer instead, seeded through
-    numpy's global RNG — plumbing-only readings — and also keys the
-    presentation shuffle (the default shuffles with seed 0). `hybrid`
-    pairs the display with the mismatched colorimeter double, exercising
-    the disciplined-colorimeter path without hardware. Returns the
-    closed mock device; its recorded history lets tests observe the
-    drive without duplicating this wiring.
+    :mod:`display_measure.plausible_display`), decoding the declared
+    `encoding` as a display whose processor passed the wire-format gate
+    would. Passing `seed` selects colour-specio's random virtual
+    spectrometer instead, seeded through numpy's global RNG —
+    plumbing-only readings — and also keys the presentation shuffle (the
+    default shuffles with seed 0). `hybrid` pairs the display with the
+    mismatched colorimeter double, exercising the disciplined-colorimeter
+    path without hardware. Returns the closed mock device; its recorded
+    history lets tests observe the drive without duplicating this wiring.
     """
     with MockBMDDeckLink(DECKLINK_INDEX) as device:
         # The mock caps frame history at 10 — too small to observe a
@@ -679,7 +692,7 @@ def doubles_session(
         device._max_frame_history = len(protocol_patches())
         instrument: Instrument
         if hybrid:
-            display = PlausibleDisplay(device)
+            display = PlausibleDisplay(device, encoding=encoding)
             instrument = HybridInstrument(
                 display,
                 MismatchedColorimeter(display),
@@ -693,7 +706,7 @@ def doubles_session(
             np.random.seed(seed)
             instrument = VirtualSpectrometer()
         else:
-            instrument = PlausibleDisplay(device)
+            instrument = PlausibleDisplay(device, encoding=encoding)
         characterize(
             device=device,
             instrument=instrument,
@@ -701,6 +714,7 @@ def doubles_session(
             clock=clock,
             settle_seconds=settle_seconds,
             seed=seed if seed is not None else 0,
+            encoding=encoding,
             declared=declared,
             reading=normalized_reading(declared),
             emit=emit,
@@ -712,6 +726,7 @@ def doubles_session(
 def _audit_processor(
     processor_host: str | None,
     declared: ProcessorStateSnapshot,
+    encoding: WireEncoding,
 ) -> ProcessorStateSnapshot:
     """Read the processor and gate on it, before any hardware is touched."""
     if processor_host is None:
@@ -724,7 +739,7 @@ def _audit_processor(
     global_colour = processor.global_colour()
     reading = audit_contract(declared, state_from_tessera(global_colour))
     audit_output_scaling(global_colour)
-    audit_wire_format(DECLARED_WIRE_FORMAT, processor.input_metadata())
+    audit_wire_format(WireFormat.for_encoding(encoding), processor.input_metadata())
     return reading
 
 
@@ -736,6 +751,7 @@ def hardware_session(
     hybrid: bool = False,
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
     processor_host: str | None = None,
+    encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
     emit: EventSink = log_events,
     cancelled: Cancelled = never_cancelled,
@@ -744,16 +760,16 @@ def hardware_session(
 
     Audits the processor before anything else: `processor_host` is read
     read-only over the Tessera API and the session refuses on any
-    divergence from `declared` (§spec:sessions). The gate runs ahead of
-    instrument discovery and the DeckLink open, so a refusal costs a
-    round trip rather than a rig.
+    divergence from `declared`, or an input link other than `encoding`
+    (§spec:sessions). The gate runs ahead of instrument discovery and
+    the DeckLink open, so a refusal costs a round trip rather than a rig.
 
     Discovers the Colorimetry Research spectroradiometer over serial —
     and, for `hybrid`, the colorimeter it disciplines against — then
     drives the protocol through the DeckLink. Discovery is by instrument
     type, so both instruments may stay plugged in.
     """
-    reading = _audit_processor(processor_host, declared)
+    reading = _audit_processor(processor_host, declared, encoding)
 
     # Deferred: specio drags colour + scipy (~0.8 s) that no doubles
     # path and no `--help` ever needs.
@@ -779,6 +795,7 @@ def hardware_session(
             out_path=out_path,
             clock=clock,
             settle_seconds=settle_seconds,
+            encoding=encoding,
             declared=declared,
             reading=reading,
             emit=emit,

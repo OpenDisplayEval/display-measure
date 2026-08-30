@@ -29,6 +29,7 @@ from display_measure.artifact import (
     PANEL_STATE_KEYS,
     PROCESSING_FEATURES,
     ProcessorStateSnapshot,
+    WireEncoding,
 )
 
 __all__ = [
@@ -67,6 +68,10 @@ MIN_PLAUSIBLE_PEAK = 1.0
 
 HTTP_TIMEOUT_SECONDS = 5.0
 
+# Tessera's name for SDR on the input metadata; what a session signals
+# under the SDR contract it audits (§spec:signal-contract).
+SDR_HDR_FORMAT = "standard-dynamic-range"
+
 
 class ContractViolation(RuntimeError):
     """The processor contradicts the declared contract, so the session stops."""
@@ -79,6 +84,22 @@ class WireFormat:
     bit_depth: int
     sampling: str
     hdr_format: str
+
+    @classmethod
+    def for_encoding(
+        cls, encoding: WireEncoding, hdr_format: str = SDR_HDR_FORMAT
+    ) -> WireFormat:
+        """What the processor should see for a declared encoding.
+
+        Derived, so the declaration cannot drift from the drive: a v210
+        session holds the processor to 10-bit YCbCr, the bench identity
+        encoding to 12-bit RGB.
+        """
+        return cls(
+            bit_depth=encoding.bit_depth,
+            sampling=encoding.sampling,
+            hdr_format=hdr_format,
+        )
 
 
 @dataclass(frozen=True)

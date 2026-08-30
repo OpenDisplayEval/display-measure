@@ -20,6 +20,7 @@ from display_measure.protocol import (
     protocol_patches,
 )
 from display_measure.session import Clock, doubles_session
+from display_measure.wire import V210, encode_pixel
 
 
 def method_calls(device: MockBMDDeckLink, method: str) -> list[dict[str, Any]]:
@@ -287,3 +288,35 @@ def test_the_level_gate_stops_the_session_at_white(
     ]
     assert len(driven) == 2, driven
     assert "black" in driven[0] and "white" in driven[1]
+
+
+def test_a_v210_session_drives_the_encoded_codes_through_the_yuv_format(
+    fixed_clock: Clock, tmp_path: Path
+) -> None:
+    """The protocol's 12-bit RGB codes reach the device as the codes the
+    declared encoding puts on the wire — pypixelpack's, not this
+    repository's — and the DeckLink is told to pack them as v210."""
+    device = doubles_session(
+        tmp_path / "v210.yaml", clock=fixed_clock, settle_seconds=0.0, encoding=V210
+    )
+    formats = [call["format"] for call in method_calls(device, "set_pixel_format")]
+    assert formats == [PixelFormatType.FORMAT_10BIT_YUV]
+    frames = device.get_frame_history()
+    expected = presentation_order(protocol_patches(), seed=0)
+    assert len(frames) == len(expected)
+    assert tuple(frames[0][0, 0]) == (64, 512, 512), "black is narrow-range black"
+    for frame, patch in zip(frames, expected, strict=True):
+        assert tuple(frame[0, 0]) == encode_pixel(V210, patch.rgb), patch.name
+
+
+def test_a_v210_session_measures_the_display_through_the_link(
+    fixed_clock: Clock, tmp_path: Path, display_artifact: Path
+) -> None:
+    """Full drive survives the narrow range exactly, so the peak agrees;
+    the shadow codes do not, so the ramps are a different measurement."""
+    out = tmp_path / "v210.yaml"
+    doubles_session(out, clock=fixed_clock, settle_seconds=0.0, encoding=V210)
+    v210 = yaml.safe_load(out.read_text())
+    rgb = yaml.safe_load(display_artifact.read_text())
+    assert v210["luminance"]["peak_luminance"] == rgb["luminance"]["peak_luminance"]
+    assert response_rows(v210) != response_rows(rgb)

@@ -196,6 +196,55 @@ DECLARED_CONTRACT = ProcessorStateSnapshot(
 )
 
 
+# What the artifact names a link's samples: RGB, or luma and chroma. A
+# session's protocol codes are RGB either way (§spec:patch-protocol); the
+# sampling says what the device received.
+SAMPLING_RGB = "rgb"
+SAMPLING_YCBCR = "ycbcr"
+
+
+@dataclass(frozen=True)
+class WireEncoding:
+    """The encoding between a patch and the device (§spec:measure-sessions).
+
+    A patch is what the processor receives; this is how it got there.
+    Declared by the session, held against the processor's input metadata
+    by the wire-format gate, and recorded so two artifacts of one display
+    over different links read as different measurements. `layout` is the
+    pypixelpack layout name; `legal_codes` names the inclusive code span
+    each component can carry, because a narrow-range encoding cannot
+    represent every RGB code the protocol drives.
+    """
+
+    layout: str
+    bit_depth: int
+    sampling: str
+    subsampling: str
+    levels: str
+    matrix: str
+    legal_codes: tuple[tuple[str, int, int], ...]
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("layout", self.layout),
+            ("sampling", self.sampling),
+            ("subsampling", self.subsampling),
+            ("levels", self.levels),
+            ("matrix", self.matrix),
+        ):
+            _renderable(value, name)
+        if self.sampling not in (SAMPLING_RGB, SAMPLING_YCBCR):
+            raise ValueError(
+                f"sampling is {SAMPLING_RGB!r} or {SAMPLING_YCBCR!r}, "
+                f"got {self.sampling!r}"
+            )
+
+    @property
+    def identity(self) -> bool:
+        """The frame is the protocol's RGB codes, untouched."""
+        return self.sampling == SAMPLING_RGB
+
+
 @dataclass(frozen=True)
 class ResponsePoint:
     """One ramp reading: the driven code and the measured absolute XYZ."""

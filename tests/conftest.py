@@ -23,8 +23,8 @@ import pytest
 from bmd_sg.decklink import MockBMDDeckLink
 
 from display_measure.events import SessionEvent
-from display_measure.protocol import PATCH_PIXEL_FORMAT
 from display_measure.session import Clock, doubles_session
+from display_measure.wire import RGB12, pixel_format
 
 FIXED_TIME = datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC)
 
@@ -33,7 +33,7 @@ FIXED_TIME = datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC)
 def device() -> Iterator[MockBMDDeckLink]:
     """A mock DeckLink declaring the session's wire format."""
     with MockBMDDeckLink(0) as mock:
-        mock.pixel_format = PATCH_PIXEL_FORMAT
+        mock.pixel_format = pixel_format(RGB12)
         yield mock
 
 

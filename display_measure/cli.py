@@ -62,6 +62,19 @@ class InstrumentChoice(StrEnum):
     HYBRID = "hybrid"
 
 
+class WireChoice(StrEnum):
+    """The link the patches ride to the device (§spec:measure-sessions).
+
+    Declared here, held against the processor's input metadata, and
+    recorded in the artifact. Restated rather than imported:
+    `display_measure.wire` pulls numpy and pypixelpack, which `--help`
+    should not pay for; the deferred import below asserts the two agree.
+    """
+
+    RGB12 = "rgb12"
+    V210 = "v210"
+
+
 @app.callback()
 def main() -> None:
     """Measure displays through the show signal chain (§spec:sessions)."""
@@ -144,6 +157,16 @@ def characterize(
         "--settle",
         help="Settle delay after each patch, seconds.",
     ),
+    wire: WireChoice = typer.Option(
+        WireChoice.RGB12,
+        "--wire",
+        help=(
+            "Wire encoding the patches ride to the device: rgb12 (12-bit "
+            "RGB identity, the bench HDMI link) or v210 (10-bit BT.709 "
+            "narrow-range 4:2:2 YCbCr). The session refuses a processor "
+            "receiving anything else, and the artifact records it."
+        ),
+    ),
     processor: str | None = typer.Option(
         None,
         "--processor",
@@ -193,10 +216,15 @@ def characterize(
     from display_measure.hybrid import DEFAULT_LUMINANCE_THRESHOLD as _DEFAULT
     from display_measure.hybrid import DerivationRefused
     from display_measure.processor import ContractViolation, contract_from_manifest
+    from display_measure.wire import WIRE_ENCODINGS
 
     assert DEFAULT_LUMINANCE_THRESHOLD == _DEFAULT, (
         "the CLI's restated routing default drifted from display_measure.hybrid"
     )
+    assert {w.value for w in WireChoice} == set(WIRE_ENCODINGS), (
+        "the CLI's restated wire encodings drifted from display_measure.wire"
+    )
+    encoding = WIRE_ENCODINGS[wire.value]
 
     if timestamp is None:
         clock = lambda: datetime.now(UTC)  # noqa: E731
@@ -238,6 +266,7 @@ def characterize(
                     settle_seconds=settle,
                     hybrid=hybrid,
                     luminance_threshold=threshold,
+                    encoding=encoding,
                     cancelled=cancelled,
                 )
             else:
@@ -248,6 +277,7 @@ def characterize(
                     hybrid=hybrid,
                     luminance_threshold=threshold,
                     processor_host=processor,
+                    encoding=encoding,
                     declared=declared,
                     cancelled=cancelled,
                 )
