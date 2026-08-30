@@ -44,9 +44,9 @@ dependencies = [
     "numpy>=2.3.1",
     # The wire encoding between a patch and the device (§spec:measure-
     # sessions): the session declares one and pypixelpack encodes it, so
-    # no conversion is implemented here. Commit pin — the encoding API is
-    # ahead of pypixelpack's last tag; move to `v1.1.0` once it is cut.
-    "pypixelpack @ git+https://github.com/Fuse-Technical-Group/pypixelpack@fae50252ce70397da26ba819273a5f8c946c0df7",
+    # no conversion is implemented here. Commit pin: a tag can be moved, so
+    # the hash pypixelpack tags as v0.1.0 is what travels with the wheel.
+    "pypixelpack @ git+https://github.com/Fuse-Technical-Group/pypixelpack@82e249e4531df297e0b81099e2b24eb08190a8d6",
     # The contract audit reads the show manifest's signal_contract
     # (§spec:session-gates). The artifact writer still emits YAML by hand.
     "pyyaml>=6.0.1",

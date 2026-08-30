@@ -184,7 +184,7 @@ requires-dist = [
     { name = "bmd-signal-generator", git = "https://github.com/OpenLEDEval/bmd-signal-gen?tag=v0.2.1" },
     { name = "colour-specio", specifier = "==0.4.2a0" },
     { name = "numpy", specifier = ">=2.3.1" },
-    { name = "pypixelpack", git = "https://github.com/Fuse-Technical-Group/pypixelpack?rev=fae50252ce70397da26ba819273a5f8c946c0df7" },
+    { name = "pypixelpack", git = "https://github.com/Fuse-Technical-Group/pypixelpack?rev=82e249e4531df297e0b81099e2b24eb08190a8d6" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "typer", specifier = ">=0.16,<0.17" },
 ]
@@ -482,8 +482,8 @@ wheels = [
 
 [[package]]
 name = "pypixelpack"
-version = "0.1.dev18+gfae50252c"
-source = { git = "https://github.com/Fuse-Technical-Group/pypixelpack?rev=fae50252ce70397da26ba819273a5f8c946c0df7#fae50252ce70397da26ba819273a5f8c946c0df7" }
+version = "0.1.0"
+source = { git = "https://github.com/Fuse-Technical-Group/pypixelpack?rev=82e249e4531df297e0b81099e2b24eb08190a8d6#82e249e4531df297e0b81099e2b24eb08190a8d6" }
 dependencies = [
     { name = "numpy" },
 ]
