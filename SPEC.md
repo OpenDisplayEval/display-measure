@@ -125,6 +125,21 @@ channel. The matrix is therefore part of the declaration, recorded in
 the artifact, and a consumer comparing two artifacts compares what each
 one states rather than assuming they match.
 
+**The lowest reproducible value is measured, per axis.** `display-measure
+floor` walks codes upward from black, reading each several times, and
+reports the lowest one whose every reading came in above every reading of
+black by more than their combined spread. It reports the climb, not only
+the answer: where the protocol's floor should sit depends on how steeply
+a display leaves black, which is a curve rather than a threshold.
+
+The walk is per axis because the answer is. A saturated primary emits a
+fraction of the light a neutral does at the same code, so the first code
+that clears black on the grey axis is well below the first that clears it
+on blue, and one number for the display would describe none of its
+channels. A rung the instrument refuses is recorded as a refusal rather
+than as darkness: the two call for different actions, a more sensitive
+instrument against more repeats or a higher floor.
+
 **The protocol's floor is not the display's.** The lowest ramp rungs can
 sit below what the instrument can resolve, and a session that drives
 them measures noise. Measured on the bench: ramp code 16 reads 0.0175

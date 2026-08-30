@@ -293,3 +293,126 @@ def characterize(
     except SessionCancelled as e:
         typer.echo(f"Cancelled: {e}", err=True)
         raise typer.Exit(CANCELLED_EXIT_CODE) from e
+
+
+@app.command()
+def floor(
+    instrument: InstrumentChoice = typer.Option(
+        InstrumentChoice.DOUBLES,
+        "--instrument",
+        help="What measures. The doubles walk the plausible display.",
+    ),
+    wire: WireChoice = typer.Option(
+        WireChoice.RGB12,
+        "--wire",
+        help="The link to walk. The floor is a property of the pairing.",
+    ),
+    axes: str = typer.Option(
+        "neutral,red,green,blue",
+        "--axes",
+        help=(
+            "Which axes to walk, comma separated. A saturated primary "
+            "leaves black at a higher code than a neutral does."
+        ),
+    ),
+    repeats: int = typer.Option(
+        3, "--repeats", min=2, help="Readings per rung; the spread is the point."
+    ),
+    settle: float = typer.Option(1.0, "--settle", help="Settle per rung, seconds."),
+    sigma: float = typer.Option(
+        3.0,
+        "--sigma",
+        help="Separation from black, in combined standard deviations.",
+    ),
+    out: Path | None = typer.Option(
+        None, "--out", help="Write the walk as YAML as well as printing it."
+    ),
+) -> None:
+    """Find the lowest code that reads reproducibly brighter than black.
+
+    A characterization is only as good as its darkest rung, and whether
+    that rung is measurable depends on the display's shadow response,
+    the instrument's repeatability and the ambient in the room — a
+    pairing on a night, not a property of the protocol. Walk it before
+    trusting a floor, and after a room changes.
+    """
+    from display_measure.floor import AXES, measure_floor, render_report
+    from display_measure.wire import WIRE_ENCODINGS
+
+    walked = [a.strip() for a in axes.split(",") if a.strip()]
+    unknown = [a for a in walked if a not in AXES]
+    if unknown:
+        raise typer.BadParameter(f"unknown axes {unknown}; choose from {list(AXES)}")
+
+    encoding = WIRE_ENCODINGS[wire.value]
+    if instrument in (InstrumentChoice.DOUBLES, InstrumentChoice.DOUBLES_HYBRID):
+        from bmd_sg.decklink import MockBMDDeckLink
+
+        from display_measure.plausible_display import PlausibleDisplay
+
+        with MockBMDDeckLink(0) as device:
+            device._max_frame_history = len(walked) * 64
+            report = measure_floor(
+                device,
+                PlausibleDisplay(device, encoding=encoding),
+                encoding,
+                axes=walked,
+                repeats=repeats,
+                settle_seconds=settle,
+                sigma=sigma,
+            )
+    else:
+        from bmd_sg.decklink import BMDDeckLink
+        from specio.spectrometers import CRSpectrometer
+
+        from display_measure.session import DECKLINK_INDEX, _setup_drive
+        from display_measure.session_log import log_events
+
+        spectroradiometer = CRSpectrometer.discover()
+        with BMDDeckLink(DECKLINK_INDEX) as device:
+            _setup_drive(device, encoding, log_events)
+            report = measure_floor(
+                device,
+                spectroradiometer,
+                encoding,
+                axes=walked,
+                repeats=repeats,
+                settle_seconds=settle,
+                sigma=sigma,
+            )
+
+    typer.echo(render_report(report))
+    if out is not None:
+        out.write_text(_floor_yaml(report, wire.value))
+        typer.echo(f"wrote {out}")
+
+
+def _floor_yaml(report: object, wire: str) -> str:
+    """The walk as YAML, rendered by hand for byte-determinism like the
+    measurements artifact."""
+    from display_measure.floor import FloorReport
+
+    assert isinstance(report, FloorReport)
+    lines = [
+        "# The lowest code each axis reads reproducibly brighter than black.",
+        f'wire: "{wire}"',
+        f"separation_sigma: {report.separation_sigma:g}",
+        f"ambient: {report.ambient:.6f}",
+        "axes:",
+    ]
+    for axis in report.axes:
+        lines += [
+            f'  - axis: "{axis.axis}"',
+            f"    lowest_separable: {axis.lowest_separable if axis.lowest_separable is not None else 'null'}",
+            f"    black_mean: {axis.black.mean:.6f}",
+            f"    black_sigma: {axis.black.sigma:.6f}",
+            "    rungs:",
+        ]
+        for rung in axis.rungs:
+            lines.append(f"      - code: {rung.code}")
+            if rung.refused:
+                lines.append(f'        refused: "{rung.refused}"')
+            else:
+                lines.append(f"        mean: {rung.mean:.6f}")
+                lines.append(f"        sigma: {rung.sigma:.6f}")
+    return "\n".join(lines) + "\n"
