@@ -86,6 +86,7 @@ from display_measure.instrument import (
     chromaticity,
     identity,
     luminance,
+    spectrum,
     xyz,
 )
 from display_measure.plausible_display import MismatchedColorimeter, PlausibleDisplay
@@ -501,6 +502,10 @@ def _characterize(
         wire_encoding=encoding,
         # What the wire carried for each patch, as driven.
         wire_codes=tuple(encode_pixel(encoding, patch.rgb) for patch in presented),
+        # The spectrum behind each reading, and how it was obtained
+        # (§spec:spectral-retention). Discarding it at this boundary
+        # would be unrecoverable, and keeping it is free.
+        spectra=tuple(spectrum(readings[patch.name]) for patch in presented),
         protocol_name=PROTOCOL_NAME,
         presentation_order=tuple(patch.name for patch in presented),
         per_channel_response=PerChannelResponse(

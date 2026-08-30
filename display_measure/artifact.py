@@ -25,6 +25,7 @@ Rendering is deterministic by construction: fixed key order, fixed
 LF line endings, UTF-8.
 """
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,93 @@ SCHEMA = "color-wrangler/measurements/2"
 # Nine decimals sits below any instrument's repeatability while keeping
 # the rendered bytes independent of Python's float repr.
 _FLOAT_DECIMALS = 9
+
+# Spectral radiance runs over decades between a black patch and full
+# white, so samples render in scientific notation rather than the fixed
+# point the rest of the artifact uses: nine significant figures hold the
+# same relative precision at either end.
+_SAMPLE_DIGITS = 9
+# Instruments report their grid to the nanometre at best.
+_WAVELENGTH_DECIMALS = 3
+
+
+# How a row got its spectrum (§spec:spectral-retention). Per row, not per
+# file: a disciplined session reads its dark end with a colorimeter, and a
+# colorimeter has no spectrum at all. An analysis that needs a real
+# spectrum can then refuse the rows that lack one rather than treating a
+# scaled estimate as a measurement.
+SPECTRUM_MEASURED = "measured"
+SPECTRUM_RECONSTRUCTED = "reconstructed"
+SPECTRUM_ABSENT = "absent"
+SPECTRUM_PROVENANCE = (SPECTRUM_MEASURED, SPECTRUM_RECONSTRUCTED, SPECTRUM_ABSENT)
+
+
+@dataclass(frozen=True)
+class Spectrum:
+    """The spectral distribution behind one reading, and where it came from.
+
+    Judgment-grade analysis is spectral — noise floors, metamerism,
+    observer variation, camera match — and a tristimulus triple answers
+    none of it, so the spectrum is retained rather than discarded at the
+    session boundary (§spec:spectral-retention).
+
+    `values` are absolute spectral radiance at `wavelengths` (nm), the
+    units colour-specio's instruments report. `derived_across` is the
+    luminance span (cd/m², low to high) a reconstruction was scaled
+    across, so a reader can judge how far it was extrapolated; it is
+    present exactly for a reconstruction.
+    """
+
+    wavelengths: tuple[float, ...]
+    values: tuple[float, ...]
+    provenance: str
+    derived_across: tuple[float, float] | None = None
+
+    def __post_init__(self) -> None:
+        if self.provenance not in SPECTRUM_PROVENANCE:
+            raise ValueError(
+                f"spectral provenance is one of {list(SPECTRUM_PROVENANCE)}; "
+                f"got {self.provenance!r}"
+            )
+        if len(self.values) != len(self.wavelengths):
+            raise ValueError(
+                "a spectrum carries as many values as wavelengths; got "
+                f"{len(self.values)} against {len(self.wavelengths)}"
+            )
+        if bool(self.values) == (self.provenance == SPECTRUM_ABSENT):
+            raise ValueError(
+                f"a {SPECTRUM_ABSENT!r} spectrum carries no samples and every "
+                f"other provenance carries some; got {self.provenance!r} with "
+                f"{len(self.values)}"
+            )
+        if (self.derived_across is not None) != (
+            self.provenance == SPECTRUM_RECONSTRUCTED
+        ):
+            raise ValueError(
+                "derived_across names the luminance span a reconstruction was "
+                f"scaled across, so it belongs to {SPECTRUM_RECONSTRUCTED!r} "
+                f"alone; got {self.provenance!r} with {self.derived_across!r}"
+            )
+
+    @property
+    def digest(self) -> str:
+        """sha256 of the samples' canonical rendering.
+
+        The projection carries this rather than the samples themselves:
+        an instrument's grid is hundreds of bins per row, and restating
+        every one would multiply the artifact's size for data the seam
+        file already holds.
+        """
+        rows = (
+            f"{w:.{_WAVELENGTH_DECIMALS}f} {v:.{_SAMPLE_DIGITS}e}\n"
+            for w, v in zip(self.wavelengths, self.values, strict=True)
+        )
+        return hashlib.sha256("".join(rows).encode("utf-8")).hexdigest()
+
+
+# What a colorimeter's reading carries, and what a session records for a
+# row no instrument gave a spectrum for.
+ABSENT_SPECTRUM = Spectrum(wavelengths=(), values=(), provenance=SPECTRUM_ABSENT)
 
 
 @dataclass(frozen=True)
@@ -363,6 +451,12 @@ class MeasurementsArtifact:
     # a protocol code survived the link is derivable from these and the
     # encoding; the artifact records only what happened.
     wire_codes: tuple[tuple[int, int, int], ...] | None = None
+    # The spectrum behind each driven patch, presentation order, each
+    # naming its own provenance (§spec:spectral-retention). A session
+    # whose instrument returns no spectrum records every row absent
+    # rather than leaving the block out: "no spectrum" is a fact about
+    # the reading, and silence is not.
+    spectra: tuple[Spectrum, ...] | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -380,6 +474,7 @@ class MeasurementsArtifact:
         for field, values in (
             ("patch_seconds", self.patch_seconds),
             ("wire_codes", self.wire_codes),
+            ("spectra", self.spectra),
             ("sources", None if routing is None else routing.sources),
         ):
             if values is not None and (
@@ -393,6 +488,10 @@ class MeasurementsArtifact:
 
 def _fmt(value: float) -> str:
     return f"{value:.{_FLOAT_DECIMALS}f}"
+
+
+def _fmt_nm(wavelength: float) -> str:
+    return f"{wavelength:.{_WAVELENGTH_DECIMALS}f}"
 
 
 def _fmt_xy(xy: tuple[float, float]) -> str:
@@ -464,6 +563,39 @@ def _encoding_lines(
             "  wire_codes:",
             *(f"    - [{a}, {b}, {c}]" for a, b, c in wire_codes),
         ]
+    return [*lines, ""]
+
+
+def _spectra_lines(spectra: tuple[Spectrum, ...]) -> list[str]:
+    """The per-row spectral provenance, presentation order.
+
+    Samples are digested rather than restated: the seam file already
+    carries them, and this rendering is the hashing projection, so the
+    digest is what makes the projection cover them.
+    """
+    lines = [
+        "# How each row got its spectrum, in presentation order",
+        "# (§spec:spectral-retention). sha256 digests the row's samples,",
+        "# which the seam file carries; derived_across is the luminance",
+        "# span (cd/m²) a reconstruction was scaled across, so a reader",
+        "# can judge how far it was extrapolated.",
+        "spectra:",
+    ]
+    for spectrum in spectra:
+        if spectrum.provenance == SPECTRUM_ABSENT:
+            lines.append(f'  - {{provenance: "{SPECTRUM_ABSENT}"}}')
+            continue
+        fields = [
+            f'provenance: "{spectrum.provenance}"',
+            f"samples: {len(spectrum.values)}",
+            f"range: [{_fmt_nm(spectrum.wavelengths[0])}, "
+            f"{_fmt_nm(spectrum.wavelengths[-1])}]",
+        ]
+        if spectrum.derived_across is not None:
+            low, high = spectrum.derived_across
+            fields.append(f"derived_across: [{_fmt(low)}, {_fmt(high)}]")
+        fields.append(f'sha256: "{spectrum.digest}"')
+        lines.append("  - {" + ", ".join(fields) + "}")
     return [*lines, ""]
 
 
@@ -560,6 +692,8 @@ def render(artifact: MeasurementsArtifact) -> str:
                 f"  patch_seconds: [{seconds}]",
             ]
         lines += [""]
+    if artifact.spectra is not None:
+        lines += _spectra_lines(artifact.spectra)
     if artifact.instrument_routing is not None:
         lines += _routing_lines(artifact.instrument_routing)
     if artifact.per_channel_response is not None:

@@ -8,10 +8,14 @@ import pytest
 import yaml
 
 from display_measure.artifact import (
+    ABSENT_SPECTRUM,
     DECLARED_CONTRACT,
     SCHEMA,
     SOURCE_COLORIMETER,
     SOURCE_SPECTRORADIOMETER,
+    SPECTRUM_ABSENT,
+    SPECTRUM_MEASURED,
+    SPECTRUM_RECONSTRUCTED,
     AdditivityTriad,
     InstrumentIdentity,
     InstrumentRouting,
@@ -19,6 +23,7 @@ from display_measure.artifact import (
     PerChannelResponse,
     ProcessorStateSnapshot,
     ResponsePoint,
+    Spectrum,
     render,
     write,
 )
@@ -368,3 +373,80 @@ class TestRenderableStrings:
     def test_the_intensity_field_is_guarded_too(self) -> None:
         with pytest.raises(ValueError, match="intensity"):
             replace(DECLARED_CONTRACT, intensity='1800" nits\n  injected: "yes')
+
+
+def spectral_artifact() -> MeasurementsArtifact:
+    """A three-row artifact carrying one row of each provenance."""
+    measured = Spectrum(
+        wavelengths=(380.0, 385.0, 390.0),
+        values=(0.1, 0.2, 0.3),
+        provenance=SPECTRUM_MEASURED,
+    )
+    return replace(
+        full_protocol_artifact(),
+        spectra=(
+            measured,
+            replace(
+                measured,
+                values=(0.01, 0.02, 0.03),
+                provenance=SPECTRUM_RECONSTRUCTED,
+                derived_across=(0.5, 512.0),
+            ),
+            ABSENT_SPECTRUM,
+        ),
+    )
+
+
+def test_every_row_names_how_its_spectrum_was_obtained() -> None:
+    """Provenance is per row, not per file (§spec:spectral-retention)."""
+    rows = yaml.safe_load(render(spectral_artifact()))["spectra"]
+    assert [row["provenance"] for row in rows] == [
+        SPECTRUM_MEASURED,
+        SPECTRUM_RECONSTRUCTED,
+        SPECTRUM_ABSENT,
+    ]
+
+
+def test_a_reconstructed_row_names_the_luminance_span_it_came_from() -> None:
+    row = yaml.safe_load(render(spectral_artifact()))["spectra"][1]
+    assert row["derived_across"] == pytest.approx([0.5, 512.0])
+
+
+def test_an_absent_row_carries_no_samples_and_no_span() -> None:
+    row = yaml.safe_load(render(spectral_artifact()))["spectra"][2]
+    assert row == {"provenance": SPECTRUM_ABSENT}
+
+
+def test_the_projection_digests_the_samples_rather_than_restating_them() -> None:
+    """The projection is the hashing basis, so it covers the spectra the
+    seam file carries — by digest, since restating tens of thousands of
+    samples would bloat every artifact."""
+    artifact = spectral_artifact()
+    assert artifact.spectra is not None
+    rows = yaml.safe_load(render(artifact))["spectra"]
+    assert rows[0]["samples"] == 3
+    assert rows[0]["sha256"] == artifact.spectra[0].digest
+    assert rows[0]["sha256"] != rows[1]["sha256"]
+
+
+def test_spectra_parallel_the_presentation_order() -> None:
+    with pytest.raises(ValueError, match="spectra"):
+        replace(full_protocol_artifact(), spectra=(ABSENT_SPECTRUM,))
+
+
+def test_a_spectrum_states_one_provenance_consistently() -> None:
+    with pytest.raises(ValueError, match="absent"):
+        Spectrum(wavelengths=(), values=(), provenance=SPECTRUM_MEASURED)
+    with pytest.raises(ValueError, match="derived_across"):
+        Spectrum(
+            wavelengths=(380.0,),
+            values=(1.0,),
+            provenance=SPECTRUM_MEASURED,
+            derived_across=(1.0, 2.0),
+        )
+    with pytest.raises(ValueError, match="as many values as wavelengths"):
+        Spectrum(wavelengths=(380.0,), values=(), provenance=SPECTRUM_MEASURED)
+
+
+def test_skeleton_artifacts_render_no_spectra_block() -> None:
+    assert "spectra" not in yaml.safe_load(render(sample_artifact()))

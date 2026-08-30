@@ -11,15 +11,24 @@ import pytest
 from bmd_sg.decklink import MockBMDDeckLink
 from conftest import drive
 
-from display_measure.artifact import DECLARED_CONTRACT
+from display_measure.artifact import (
+    DECLARED_CONTRACT,
+    SPECTRUM_ABSENT,
+    SPECTRUM_MEASURED,
+    Spectrum,
+)
+from display_measure.instrument import spectrum
 from display_measure.plausible_display import (
+    BASIS_XYZ,
     BLACK_LEVEL,
     BLUE_XY,
     DECODE_GAMMA,
+    EMITTER_PEAKS,
     FILTER_MISMATCH,
     GREEN_XY,
     PEAK_LUMINANCE,
     RED_XY,
+    WAVELENGTHS,
     WHITE_XY,
     MismatchedColorimeter,
     PlausibleDisplay,
@@ -137,3 +146,66 @@ def test_colorimeter_misreads_a_primary_chromaticity(
     colorimeter = MismatchedColorimeter(display)
     drive(device, (FULL_DRIVE, 0, 0))
     assert colorimeter.measure().xy != pytest.approx(display.measure().xy, abs=1e-3)
+
+
+def integrate(spectrum: Spectrum) -> np.ndarray:
+    """The spectrum's absolute XYZ, the way a reader of the seam file
+    computes it — CIE 1931, k=683."""
+    from colour import SpectralDistribution
+    from colour.colorimetry.tristimulus_values import sd_to_XYZ
+
+    sd = SpectralDistribution(np.array(spectrum.values), np.array(spectrum.wavelengths))
+    return np.asarray(sd_to_XYZ(sd, k=683, method="ASTM E308"))
+
+
+def test_the_stated_basis_tristimulus_matches_colour_science() -> None:
+    """`BASIS_XYZ` is stated so the session path never imports colour;
+    this is the check that keeps the statement true."""
+    from colour import SpectralDistribution
+    from colour.colorimetry.tristimulus_values import sd_to_XYZ
+
+    for index, (centre, sigma) in enumerate(EMITTER_PEAKS):
+        gaussian = np.exp(-0.5 * ((WAVELENGTHS - centre) / sigma) ** 2)
+        sd = SpectralDistribution(gaussian, WAVELENGTHS)
+        computed = sd_to_XYZ(sd, k=683, method="ASTM E308")
+        assert computed == pytest.approx(BASIS_XYZ[:, index])
+
+
+@pytest.mark.parametrize(
+    "rgb",
+    [
+        (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE),
+        (FULL_DRIVE, 0, 0),
+        (0, FULL_DRIVE, 0),
+        (0, 0, FULL_DRIVE),
+        (0, 0, 0),
+        (256, 512, 128),
+    ],
+)
+def test_the_spectrum_integrates_back_to_the_reading_beside_it(
+    device: MockBMDDeckLink, rgb: tuple[int, int, int]
+) -> None:
+    """A file whose spectra contradict its tristimulus is worse than one
+    with no spectra at all."""
+    display = PlausibleDisplay(device)
+    drive(device, rgb)
+    reading = display.measure()
+    assert integrate(reading.spectrum) == pytest.approx(reading.XYZ, rel=1e-9)
+
+
+def test_the_display_reports_its_spectra_as_measured(
+    device: MockBMDDeckLink,
+) -> None:
+    display = PlausibleDisplay(device)
+    drive(device, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE))
+    assert spectrum(display.measure()).provenance == SPECTRUM_MEASURED
+
+
+def test_the_colorimeter_reports_no_spectrum_at_all(
+    device: MockBMDDeckLink,
+) -> None:
+    """Three filtered photodiodes have no spectrum to report, and the
+    session records that rather than leaving the row silent."""
+    colorimeter = MismatchedColorimeter(PlausibleDisplay(device))
+    drive(device, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE))
+    assert spectrum(colorimeter.measure()).provenance == SPECTRUM_ABSENT

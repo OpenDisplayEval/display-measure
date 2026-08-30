@@ -203,6 +203,18 @@ def test_disciplining_the_colorimeter_reproduces_the_spectro_only_session(
         assert xyz == pytest.approx(spectro_rows[key], rel=1e-8), key
 
 
+def test_every_row_records_how_its_spectrum_was_obtained(
+    display_artifact: Path,
+) -> None:
+    """The spectroradiometer path measures one for every patch, and the
+    artifact says so row by row (§spec:spectral-retention)."""
+    doc = yaml.safe_load(display_artifact.read_text())
+    spectra = doc["spectra"]
+    assert len(spectra) == len(doc["protocol"]["presentation_order"])
+    assert {row["provenance"] for row in spectra} == {"measured"}
+    assert all(row["samples"] > 0 and row["sha256"] for row in spectra)
+
+
 def test_single_instrument_sessions_record_no_routing(display_artifact: Path) -> None:
     assert "instrument_routing" not in yaml.safe_load(display_artifact.read_text())
 
