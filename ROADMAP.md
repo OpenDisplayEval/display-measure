@@ -54,46 +54,6 @@ sees a refusal with no gate behind it. §spec:session-events,
 features, wire format or ambient floor contradicts the manifest exits
 non-zero naming the field, before any patch is driven.
 
-## Wire encoding as a declared, recorded parameter §road:wire-encoding
-
-A patch is what the processor receives; the encoding between that and
-the device is declared by the session, held against the processor's
-input metadata, and recorded in the artifact. Umbrella `§spec:architecture`
-(color-wrangler) and §spec:measure-sessions.
-
-### Declare the encoding per session §road:declare-wire-encoding
-
-Replace the `DECLARED_WIRE_FORMAT` constant with a session parameter —
-bit depth, sampling, range, colour matrix, layout — defaulting to the
-bench's 12-bit RGB identity encoding (`display_measure/session.py`,
-`display_measure/protocol.py`). The session drives `Patch.rgb` through
-the declared encoding via the shared packer and never implements one;
-`audit_wire_format` holds the processor to what was declared.
-Blocked — the shared packer with a parameterised matrix lands in
-`pypixelpack` first (`§road:hoist-packing` in pydecklink). Unblocked
-when that ships.
-
-### Record the encoding in the artifact §road:record-wire-encoding
-
-Write the declared encoding into the artifact and bump the schema to
-`color-wrangler/measurements/2` (`display_measure/artifact.py`), so two
-artifacts of one display over different links are legibly different
-measurements and a loader can refuse to compare them silently.
-Depends on §road:declare-wire-encoding.
-
-Narrow-range encodings cannot represent every RGB code: 10-bit narrow
-gives luma 64–940, and the round trip through the processor's inverse
-does not land on every 12-bit RGB value. The artifact therefore records
-the code actually representable on the wire, not only the code the
-protocol intended.
-
-**Verify:** a session over the bench HDMI link writes `measurements/2`
-declaring 12-bit RGB identity and is byte-identical to today's artifact
-but for the schema and encoding block; a session declaring v210 is
-refused by the wire-format gate unless the processor reports 10-bit
-YCbCr; and a reader given one artifact of each refuses to treat them as
-the same measurement.
-
 ## Self-describing measurement seam §road:measurement-seam
 
 The measure and validate layers meet at one file that states what
