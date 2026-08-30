@@ -276,17 +276,26 @@ def _pixel_format(encoding: WireEncoding) -> PixelFormatType:
 
 
 def _setup_drive(device: PatchDrive, encoding: WireEncoding, emit: EventSink) -> None:
-    """Declare pixel format and EOTF signaling, then start playback.
+    """Declare pixel format and EOTF signaling, start playback, put the
+    format on the wire.
 
     The pixel format is the declared encoding's, so the wire the gate
-    held the processor to is the wire the device packs. bmd-signal-gen
+    holds the processor to is the wire the device packs. bmd-signal-gen
     defaults to PQ InfoFrames, which would fault an SDR-contract
     display, so the session signals explicitly (§spec:sessions).
+
+    Playback alone does not settle the link. A processor reports the
+    format of the frames it is receiving, and between `start_playback`
+    and the first frame there are none — the bench processor kept
+    reporting the previous run's 8-bit 4:2:2 and refused a valid 12-bit
+    RGB session for it. Driving black closes that window, and black is
+    what the session opens on anyway.
     """
     packed = _pixel_format(encoding)
     device.pixel_format = packed
     device.set_hdr_metadata(HDRMetadata(eotf=EOTFType.SDR))
     device.start_playback()
+    device.display_frame(_frame(encoding, Patch("black", (0, 0, 0), role="setup")))
     # The enum names, not the enums: an event crossing a wire should
     # not drag bmd-signal-gen in behind it.
     emit(PlaybackStarted(packed.name, EOTFType.SDR.name))
