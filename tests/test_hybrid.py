@@ -13,15 +13,22 @@ import pytest
 from bmd_sg.decklink import MockBMDDeckLink
 from conftest import drive
 
-from display_measure.artifact import SOURCE_COLORIMETER, SOURCE_SPECTRORADIOMETER
+from display_measure.artifact import (
+    SOURCE_COLORIMETER,
+    SOURCE_SPECTRORADIOMETER,
+    SPECTRUM_ABSENT,
+    SPECTRUM_MEASURED,
+    SPECTRUM_RECONSTRUCTED,
+)
 from display_measure.hybrid import (
+    DEFAULT_LUMINANCE_THRESHOLD,
     DERIVATION_PATCHES,
     DerivationRefused,
     HybridInstrument,
     audit_derivation,
     four_color_matrix,
 )
-from display_measure.instrument import XYZReading
+from display_measure.instrument import InstrumentReading, XYZReading, spectrum
 from display_measure.plausible_display import (
     FILTER_MISMATCH,
     PEAK_LUMINANCE,
@@ -286,3 +293,82 @@ class TestDerivationAudit:
                 four_color_matrix(reference, colorimeter), reference, colorimeter
             )
         assert "cd/m²" in str(e.value)
+
+
+class TestReconstruction:
+    """Colorimeter-routed rows get a spectrum, and it is named as one.
+
+    The scaling is legitimate to the degree an emitter's spectral shape
+    is drive-invariant (§spec:spectral-retention), so what the row has to
+    carry is the span it was scaled across.
+    """
+
+    ORDER = (*DERIVATION_PATCHES, "white", "gray_0016", "black")
+
+    def readings(
+        self, device: MockBMDDeckLink
+    ) -> tuple[HybridInstrument, dict[str, InstrumentReading]]:
+        """A session at the shipped threshold: white lands on the
+        spectroradiometer, the dark rungs on the colorimeter — which is
+        the split a reconstruction exists to bridge."""
+        display = PlausibleDisplay(device)
+        hybrid = HybridInstrument(
+            display,
+            MismatchedColorimeter(display),
+            luminance_threshold=DEFAULT_LUMINANCE_THRESHOLD,
+        )
+        readings = {}
+        for name in self.ORDER:
+            drive(device, PATCH_RGB[name])
+            readings[name] = hybrid.measure_patch(name)
+        return hybrid, readings
+
+    def test_a_spectroradiometer_row_keeps_its_measured_spectrum(
+        self, device: MockBMDDeckLink
+    ) -> None:
+        _, readings = self.readings(device)
+        assert spectrum(readings["red_2048"]).provenance == SPECTRUM_MEASURED
+
+    def test_a_colorimeter_row_is_reconstructed_from_the_bright_reading(
+        self, device: MockBMDDeckLink
+    ) -> None:
+        _, readings = self.readings(device)
+        reconstructed = spectrum(readings["gray_0016"])
+        assert reconstructed.provenance == SPECTRUM_RECONSTRUCTED
+        # White is the bright reading of the same stimulus, so the shape
+        # is white's and the scale is the dark row's own luminance.
+        anchor = spectrum(readings["white"])
+        scale = readings["gray_0016"].XYZ[1] / readings["white"].XYZ[1]
+        assert reconstructed.values == pytest.approx(
+            [value * scale for value in anchor.values], rel=1e-9
+        )
+
+    def test_the_reconstruction_names_the_span_it_was_scaled_across(
+        self, device: MockBMDDeckLink
+    ) -> None:
+        _, readings = self.readings(device)
+        span = spectrum(readings["gray_0016"]).derived_across
+        assert span is not None
+        low, high = span
+        assert low == pytest.approx(float(readings["gray_0016"].XYZ[1]))
+        assert high == pytest.approx(float(readings["white"].XYZ[1]))
+        assert low < high, "the span reads low to high, so extrapolation is visible"
+
+    def test_a_row_with_no_bright_reading_of_its_stimulus_stays_absent(
+        self, device: MockBMDDeckLink
+    ) -> None:
+        """Black leaks; it is not a dimmer white, so nothing measured
+        stands in for it. Absent is the honest record."""
+        _, readings = self.readings(device)
+        assert spectrum(readings["black"]).provenance == SPECTRUM_ABSENT
+
+    def test_reconstruction_preserves_the_measured_tristimulus(
+        self, device: MockBMDDeckLink
+    ) -> None:
+        """The row's XYZ is what the disciplined colorimeter measured;
+        the reconstruction is a spectrum beside it, not a replacement."""
+        display = PlausibleDisplay(device)
+        _, readings = self.readings(device)
+        drive(device, PATCH_RGB["gray_0016"])
+        routed = readings["gray_0016"].XYZ
+        assert routed == pytest.approx(display.measure().XYZ, rel=1e-9)

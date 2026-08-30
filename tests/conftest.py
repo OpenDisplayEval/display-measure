@@ -138,3 +138,21 @@ def hybrid_artifact(
         luminance_threshold=full_ramp_threshold,
     )
     return out
+
+
+@pytest.fixture(scope="session")
+def routed_hybrid_artifact(
+    tmp_path_factory: pytest.TempPathFactory,
+    fixed_clock: Clock,
+) -> Path:
+    """One hybrid session at the shipped routing threshold — the split a
+    real rig runs, where the bright patches land on the
+    spectroradiometer and the dark rungs on the disciplined colorimeter.
+
+    `hybrid_artifact` forces every row to the colorimeter to check the
+    correction; this one is what the CLI's default drives, so it is the
+    fixture that carries all three spectral provenances at once.
+    """
+    out = tmp_path_factory.mktemp("routed") / "measurements.yaml"
+    doubles_session(out, clock=fixed_clock, settle_seconds=0.0, hybrid=True)
+    return out

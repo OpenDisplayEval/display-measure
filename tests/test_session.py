@@ -215,6 +215,44 @@ def test_every_row_records_how_its_spectrum_was_obtained(
     assert all(row["samples"] > 0 and row["sha256"] for row in spectra)
 
 
+def test_a_routed_hybrid_session_names_all_three_provenances(
+    routed_hybrid_artifact: Path,
+) -> None:
+    """The split a real rig runs: bright rows measured, dark rows
+    reconstructed from the bright reading of the same stimulus, and
+    black — which no measured row stands in for — absent."""
+    doc = yaml.safe_load(routed_hybrid_artifact.read_text())
+    order = doc["protocol"]["presentation_order"]
+    rows = dict(zip(order, doc["spectra"], strict=True))
+    assert {row["provenance"] for row in doc["spectra"]} == {
+        "measured",
+        "reconstructed",
+        "absent",
+    }
+    assert rows["white"]["provenance"] == "measured"
+    assert rows["black"]["provenance"] == "absent"
+    dark = rows["gray_0016"]
+    assert dark["provenance"] == "reconstructed"
+    low, high = dark["derived_across"]
+    assert low < high, "the span the scaling reached across, low to high"
+    assert high == pytest.approx(doc["luminance"]["peak_luminance"], rel=1e-6)
+
+
+def test_reconstructed_rows_can_be_excluded_by_an_analysis(
+    routed_hybrid_artifact: Path,
+) -> None:
+    """The Verify criterion: a reader wanting measured spectra alone can
+    tell which rows to drop, and why."""
+    doc = yaml.safe_load(routed_hybrid_artifact.read_text())
+    measured = [row for row in doc["spectra"] if row["provenance"] == "measured"]
+    reconstructed = [
+        row for row in doc["spectra"] if row["provenance"] == "reconstructed"
+    ]
+    assert measured and reconstructed
+    assert all("derived_across" in row for row in reconstructed)
+    assert all("derived_across" not in row for row in measured)
+
+
 def test_single_instrument_sessions_record_no_routing(display_artifact: Path) -> None:
     assert "instrument_routing" not in yaml.safe_load(display_artifact.read_text())
 
