@@ -7,10 +7,10 @@ conversion; what the device packs is the declared encoding's codes.
 import numpy as np
 import pytest
 
+from display_measure import wire
 from display_measure.artifact import WireEncoding
 from display_measure.processor import WireFormat
 from display_measure.protocol import FULL_DRIVE, protocol_patches
-from display_measure import wire
 from display_measure.wire import (
     RGB12,
     V210,
