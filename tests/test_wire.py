@@ -118,8 +118,11 @@ def test_the_probe_straddles_the_narrow_span_in_wire_codes() -> None:
     """v210's probe sits either side of 64 and 940, chroma neutral."""
     patches = wire.range_probe_patches(wire.V210)
     codes = [p.wire_codes for p in patches]
-    assert [c[0] for c in codes] == [56, 64, 72, 932, 940, 948]
-    assert {c[1] for c in codes} == {512} and {c[2] for c in codes} == {512}
+    assert all(c is not None for c in codes)
+    luma = [c[0] for c in codes if c is not None]
+    assert luma == [56, 64, 72, 932, 940, 948]
+    assert {c[1] for c in codes if c is not None} == {512}
+    assert {c[2] for c in codes if c is not None} == {512}
     assert wire.expects_clipping(wire.V210)
 
 
@@ -129,9 +132,11 @@ def test_the_probe_straddles_the_limited_span_on_an_identity_link() -> None:
     The edges are the ones a processor misreading the link as narrow
     would clip to; the session requires that it does not.
     """
-    patches = wire.range_probe_patches(wire.RGB12)
-    assert [p.wire_codes[0] for p in patches] == [224, 256, 288, 3728, 3760, 3792]
-    assert all(len(set(p.wire_codes)) == 1 for p in patches)  # neutral in RGB
+    codes = [p.wire_codes for p in wire.range_probe_patches(wire.RGB12)]
+    assert all(c is not None for c in codes)
+    assert [c[0] for c in codes if c is not None] == [224, 256, 288, 3728, 3760, 3792]
+    # neutral, so the probe rides the grey axis rather than a channel
+    assert all(len(set(c)) == 1 for c in codes if c is not None)
     assert not wire.expects_clipping(wire.RGB12)
 
 
