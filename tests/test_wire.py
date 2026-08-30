@@ -10,7 +10,14 @@ import pytest
 from display_measure.artifact import WireEncoding
 from display_measure.processor import WireFormat
 from display_measure.protocol import FULL_DRIVE, protocol_patches
-from display_measure.wire import RGB12, V210, WIRE_ENCODINGS, decode_pixel, encode_pixel
+from display_measure import wire
+from display_measure.wire import (
+    RGB12,
+    V210,
+    WIRE_ENCODINGS,
+    decode_pixel,
+    encode_pixel,
+)
 
 WHITE = (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE)
 
@@ -79,3 +86,87 @@ def test_the_named_encodings_are_the_two_the_cli_offers() -> None:
 def test_a_code_above_full_drive_is_refused() -> None:
     with pytest.raises(ValueError, match="4095"):
         encode_pixel(V210, (FULL_DRIVE + 1, 0, 0))
+
+
+# --- the range probe: what a link's own codes say about how it is read ----
+#
+# The luminances below are the bench, 2026-08-30: a 1800-nit LED wall
+# behind a Brompton S8, measured with a CR-300 in a darkened room, over
+# both links. They are the oracle because the failure this probe exists
+# to catch is a processor-side misreading, which no simulation of our own
+# encoder can produce.
+
+SDI_NARROW_READ_CORRECTLY = {
+    "wire_below_floor": 0.0136,
+    "wire_floor": 0.0095,
+    "wire_above_floor": 0.0606,
+    "wire_below_ceiling": 1451.2892,
+    "wire_ceiling": 1481.0965,
+    "wire_above_ceiling": 1479.7200,
+}
+HDMI_FULL_READ_CORRECTLY = {
+    "wire_below_floor": 2.3037,
+    "wire_floor": 3.0855,
+    "wire_above_floor": 4.0780,
+    "wire_below_ceiling": 1183.4130,
+    "wire_ceiling": 1206.7687,
+    "wire_above_ceiling": 1230.4391,
+}
+
+
+def test_the_probe_straddles_the_narrow_span_in_wire_codes() -> None:
+    """v210's probe sits either side of 64 and 940, chroma neutral."""
+    patches = wire.range_probe_patches(wire.V210)
+    codes = [p.wire_codes for p in patches]
+    assert [c[0] for c in codes] == [56, 64, 72, 932, 940, 948]
+    assert {c[1] for c in codes} == {512} and {c[2] for c in codes} == {512}
+    assert wire.expects_clipping(wire.V210)
+
+
+def test_the_probe_straddles_the_limited_span_on_an_identity_link() -> None:
+    """rgb12 carries every code, so the probe asks the opposite question.
+
+    The edges are the ones a processor misreading the link as narrow
+    would clip to; the session requires that it does not.
+    """
+    patches = wire.range_probe_patches(wire.RGB12)
+    assert [p.wire_codes[0] for p in patches] == [224, 256, 288, 3728, 3760, 3792]
+    assert all(len(set(p.wire_codes)) == 1 for p in patches)  # neutral in RGB
+    assert not wire.expects_clipping(wire.RGB12)
+
+
+def test_a_narrow_link_read_narrow_agrees() -> None:
+    agrees, why = wire.range_probe_verdict(
+        SDI_NARROW_READ_CORRECTLY, expect_clipped=True
+    )
+    assert agrees, why
+
+
+def test_a_full_link_read_full_agrees() -> None:
+    agrees, why = wire.range_probe_verdict(
+        HDMI_FULL_READ_CORRECTLY, expect_clipped=False
+    )
+    assert agrees, why
+
+
+def test_a_narrow_link_read_full_is_caught() -> None:
+    """The failure the protocol's own patches cannot see.
+
+    Every RGB-authored patch encodes inside the legal span, so a
+    processor carrying codes outside it looks exactly like a display with
+    a lifted black. Judging the narrow bench readings against a full
+    expectation is that mistake, and the probe refuses it.
+    """
+    agrees, why = wire.range_probe_verdict(
+        SDI_NARROW_READ_CORRECTLY, expect_clipped=False
+    )
+    assert not agrees
+    assert "floor" in why and "ceiling" in why
+
+
+def test_a_probe_that_moved_nothing_inside_the_span_is_not_a_pass() -> None:
+    """A dead link reads as clipped at every edge; that is not agreement."""
+    flat = dict.fromkeys(SDI_NARROW_READ_CORRECTLY, 0.0)
+    agrees, why = wire.range_probe_verdict(flat, expect_clipped=True)
+    assert not agrees
+    assert "moved nothing" in why

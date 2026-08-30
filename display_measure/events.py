@@ -53,6 +53,7 @@ __all__ = [
     "SessionEvent",
     "SessionMode",
     "SessionStarted",
+    "WireFormatUnverified",
 ]
 
 
@@ -169,6 +170,21 @@ class PlaybackStarted(SessionEvent):
 
     pixel_format: str
     eotf: str
+
+
+@dataclass(frozen=True)
+class WireFormatUnverified(SessionEvent):
+    """The wire gate ran but the link could not answer for some fields.
+
+    A gate that passes because the processor said nothing is not the same
+    as one that passes because the processor agreed, and an operator
+    reading a session log deserves to be told which happened
+    (§spec:measure-sessions).
+    """
+
+    layout: str
+    fields: tuple[str, ...]
+    detail: str
 
 
 @dataclass(frozen=True)

@@ -12,12 +12,14 @@ this module's: pypixelpack's layout names are the DeckLink FourCCs, and
 `session._setup_drive` resolves them there.
 """
 
+from collections.abc import Mapping
+
 import numpy as np
 import numpy.typing as npt
 import pypixelpack
 
 from display_measure.artifact import SAMPLING_RGB, SAMPLING_YCBCR, WireEncoding
-from display_measure.protocol import CODE_BITS, FULL_DRIVE
+from display_measure.protocol import CODE_BITS, FULL_DRIVE, Patch
 
 __all__ = ["RGB12", "V210", "WIRE_ENCODINGS", "decode_pixel", "encode_pixel"]
 
@@ -120,3 +122,118 @@ def decode_pixel(
         layout=encoding.layout,
     )
     return np.asarray(rgb[0, 0], dtype=np.float64)
+
+
+# How far outside and inside each edge the probe steps, in wire codes. Big
+# enough that the inside step is far above instrument noise on a 1800-nit
+# display, small enough that both stay in the same region of the transfer.
+PROBE_STEP = 8
+
+# The outside step, as a fraction of the inside one, below which the codes
+# outside the span are judged clipped. Measured on the bench at 0.08 and
+# 0.05 for the two edges of a correctly-read narrow link, against 1.0 for
+# a span the processor is not clipping at all; a quarter sits between the
+# two by a wide margin (§spec:measure-sessions).
+CLIPPED_STEP_RATIO = 0.25
+
+
+def range_probe_patches(encoding: WireEncoding) -> tuple[Patch, ...]:
+    """Four patches straddling the declared span's edges, in wire codes.
+
+    The protocol's own patches are authored in RGB, so every one of them
+    encodes to a code *inside* the legal span — which is exactly why they
+    cannot see a range misreading. A processor that treats a narrow link
+    as full renders a lifted black and a dim peak, and nothing in a ramp
+    of legal codes distinguishes that from a display that simply has a
+    lifted black.
+
+    The codes on either side of each edge do distinguish it. Under the
+    declared narrow span they clip, so the step outside the edge is far
+    smaller than the step inside it; read as full they do not clip, and
+    the two steps match.
+    """
+    lo, hi = _probe_span(encoding)
+    step = PROBE_STEP << (encoding.bit_depth - 10)
+    if encoding.identity:
+        # An identity link carries every code, so the probe rides the
+        # neutral axis in RGB rather than luma-with-neutral-chroma.
+        def codes(value: int) -> tuple[int, int, int]:
+            return (value, value, value)
+    else:
+        mid = _chroma_mid(encoding)
+
+        def codes(value: int) -> tuple[int, int, int]:
+            return (value, mid, mid)
+
+    return tuple(
+        Patch(name, (0, 0, 0), role="wire_range_probe", wire_codes=codes(code))
+        for name, code in (
+            ("wire_below_floor", lo - step),
+            ("wire_floor", lo),
+            ("wire_above_floor", lo + step),
+            ("wire_below_ceiling", hi - step),
+            ("wire_ceiling", hi),
+            ("wire_above_ceiling", hi + step),
+        )
+    )
+
+
+def expects_clipping(encoding: WireEncoding) -> bool:
+    """Whether codes outside the probe's span should render as clipped.
+
+    A narrow link declares a span smaller than the code space, so the
+    codes outside it are not content and the processor should clip them.
+    An identity link declares the whole code space, and the probe instead
+    straddles the *limited* span a processor would use if it misread the
+    link as narrow — codes it must keep, not clip. Both links therefore
+    get a measured range check; only the expected answer differs.
+    """
+    return not encoding.identity
+
+
+def _probe_span(encoding: WireEncoding) -> tuple[int, int]:
+    """The two edges the probe straddles, in wire codes."""
+    if encoding.identity:
+        # The limited-range span at this depth: the edges a processor
+        # that misread a full link as narrow would clip to.
+        scale = 1 << (encoding.bit_depth - 8)
+        return 16 * scale, 235 * scale
+    codes = pypixelpack.legal_codes(levels=encoding.levels, bits=encoding.bit_depth)
+    return codes.luma.start, codes.luma.stop - 1
+
+
+def _chroma_mid(encoding: WireEncoding) -> int:
+    """The code that carries no colour difference, so the probe is neutral."""
+    return 1 << (encoding.bit_depth - 1)
+
+
+def range_probe_verdict(
+    luminances: Mapping[str, float], *, expect_clipped: bool
+) -> tuple[bool, str]:
+    """Whether the processor reads the declared span. `(agrees, why)`.
+
+    Takes the six probe readings by patch name and compares, at each
+    edge, the step taken outside the span against the step taken inside
+    it. Clipping outside both edges is the declared narrow span being
+    honoured; a step outside that rivals the step inside is the processor
+    carrying codes the declaration says are not there, which is a
+    full-range reading of a narrow link and moves every measurement.
+    """
+    verdicts: list[str] = []
+    clipped = True
+    for edge, outside, at, inside in (
+        ("floor", "wire_below_floor", "wire_floor", "wire_above_floor"),
+        ("ceiling", "wire_above_ceiling", "wire_ceiling", "wire_below_ceiling"),
+    ):
+        anchor = luminances[at]
+        outside_step = abs(luminances[outside] - anchor)
+        inside_step = abs(luminances[inside] - anchor)
+        if inside_step == 0:
+            verdicts.append(f"{edge}: the step inside the span moved nothing")
+            clipped = False
+            continue
+        ratio = outside_step / inside_step
+        verdicts.append(f"{edge}: outside/inside = {ratio:.2f}")
+        if ratio >= CLIPPED_STEP_RATIO:
+            clipped = False
+    return clipped == expect_clipped, "; ".join(verdicts)

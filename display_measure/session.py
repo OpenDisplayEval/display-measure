@@ -73,6 +73,7 @@ from display_measure.events import (
     SessionEnded,
     SessionMode,
     SessionStarted,
+    WireFormatUnverified,
 )
 from display_measure.hybrid import (
     DEFAULT_LUMINANCE_THRESHOLD,
@@ -157,13 +158,20 @@ class PatchDrive(DeckLinkOutput, Protocol):
     def pixel_format(self, pixel_format_type: PixelFormatType) -> None: ...
 
 
-def _frame(encoding: WireEncoding, rgb: tuple[int, int, int]) -> npt.NDArray[np.uint16]:
-    """A flat field of the codes the wire carries for `rgb`.
+def _frame(encoding: WireEncoding, patch: Patch) -> npt.NDArray[np.uint16]:
+    """A flat field of the codes the wire carries for `patch`.
 
     One pixel is encoded and broadcast: a patch is a flat field, so
     converting 1920x1080 of it per patch would buy nothing.
+
+    A range-probe patch carries its codes already, and deliberately
+    carries codes no RGB triple encodes to — driving them is the whole
+    point of it (§spec:measure-sessions), so they go to the wire
+    untouched.
     """
-    codes = encode_pixel(encoding, rgb)
+    codes = patch.wire_codes if patch.wire_codes is not None else encode_pixel(
+        encoding, patch.rgb
+    )
     return np.full((FRAME_HEIGHT, FRAME_WIDTH, 3), codes, dtype=np.uint16)
 
 
@@ -283,7 +291,7 @@ def _drive(
     emit: EventSink,
 ) -> None:
     emit(PatchStarted(index, patch.name, patch.rgb))
-    device.display_frame(_frame(encoding, patch.rgb))
+    device.display_frame(_frame(encoding, patch))
 
 
 def _settle(seconds: float, index: int, emit: EventSink) -> None:
@@ -749,6 +757,7 @@ def _audit_processor(
     processor_host: str | None,
     declared: ProcessorStateSnapshot,
     encoding: WireEncoding,
+    emit: EventSink = log_events,
 ) -> ProcessorStateSnapshot:
     """Read the processor and gate on it, before any hardware is touched."""
     if processor_host is None:
@@ -761,7 +770,22 @@ def _audit_processor(
     global_colour = processor.global_colour()
     reading = audit_contract(declared, state_from_tessera(global_colour))
     audit_output_scaling(global_colour)
-    audit_wire_format(WireFormat.for_encoding(encoding), processor.input_metadata())
+    unverified = audit_wire_format(
+        WireFormat.for_encoding(encoding), processor.input_metadata()
+    )
+    if unverified:
+        # Said out loud, every session, because the alternative is an
+        # operator reading a green gate and believing the link was
+        # checked. On SDI this fires for all three fields.
+        emit(
+            WireFormatUnverified(
+                encoding.layout,
+                unverified,
+                "the processor publishes no metadata for these on this link; "
+                "the range probe measures what it can and the rest rides on "
+                "the declaration",
+            )
+        )
     return reading
 
 

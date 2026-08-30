@@ -102,11 +102,21 @@ class WireFormat:
 
 @dataclass(frozen=True)
 class InputMetadata:
-    """The processor's own view of the link, read back from the active port."""
+    """The processor's own view of the link, read back from the active port.
 
-    bit_depth: int
-    sampling: str
-    hdr_format: str
+    Every field is optional because a link may carry no way to report it.
+    HDMI publishes bit depth, sampling and HDR format because InfoFrames
+    carry them and the processor's input controls read `from-input`. SDI
+    publishes none of the three: the payload identifier that would say so
+    is not on the Tessera API, and the port's colour controls are
+    settings rather than detections. A field that is `None` is one the
+    processor cannot answer, which is not the same as one it contradicts
+    (§spec:measure-sessions).
+    """
+
+    bit_depth: int | None = None
+    sampling: str | None = None
+    hdr_format: str | None = None
 
 
 def contract_from_manifest(path: Path) -> ProcessorStateSnapshot:
@@ -376,34 +386,39 @@ def audit_output_scaling(global_colour: dict[str, Any]) -> None:
         )
 
 
-def audit_wire_format(declared: WireFormat, live: InputMetadata) -> None:
-    """Refuse unless the processor sees the link the session declares it drives.
+def audit_wire_format(declared: WireFormat, live: InputMetadata) -> tuple[str, ...]:
+    """Refuse on a contradiction; return the fields the processor could not answer.
 
     A declared 12-bit RGB SDR link that the processor reports as 10-bit, or
     as PQ, bakes its own quantization and transfer into the "measured"
     response (§req:wire-format).
+
+    Silence is not agreement. An SDI link publishes none of these fields,
+    so auditing it against them would either crash on the missing keys or,
+    worse, read absence as a match. The unanswered fields come back by
+    name so the session records what this link left unverified rather
+    than claiming a gate that never ran (§spec:measure-sessions).
     """
     problems: list[str] = []
-    if declared.bit_depth != live.bit_depth:
-        problems.append(
-            f"bit depth: session drives {declared.bit_depth}-bit, "
-            f"processor receives {live.bit_depth}-bit"
-        )
-    if declared.sampling != live.sampling:
-        problems.append(
-            f"sampling: session drives {declared.sampling}, "
-            f"processor receives {live.sampling}"
-        )
-    if declared.hdr_format != live.hdr_format:
-        problems.append(
-            f"hdr signalling: session declares {declared.hdr_format}, "
-            f"processor receives {live.hdr_format}"
-        )
+    unverified: list[str] = []
+    for field, mine, theirs, render in (
+        ("bit depth", declared.bit_depth, live.bit_depth, "{}-bit"),
+        ("sampling", declared.sampling, live.sampling, "{}"),
+        ("hdr signalling", declared.hdr_format, live.hdr_format, "{}"),
+    ):
+        if theirs is None:
+            unverified.append(field)
+        elif mine != theirs:
+            problems.append(
+                f"{field}: session drives {render.format(mine)}, "
+                f"processor receives {render.format(theirs)}"
+            )
     if problems:
         raise ContractViolation(
             "the processor's input metadata contradicts the declared wire "
             "format; refusing to measure:\n  - " + "\n  - ".join(problems)
         )
+    return tuple(unverified)
 
 
 class TesseraProcessor:
@@ -447,8 +462,10 @@ class TesseraProcessor:
                 f"absent from input/ports/{port_type}"
             )
         meta = node["meta-data"]
+        hdr = meta.get("hdr")
+        depth, sampling = meta.get("bit-depth"), meta.get("sampling")
         return InputMetadata(
-            bit_depth=int(meta["bit-depth"]),
-            sampling=str(meta["sampling"]),
-            hdr_format=str(meta["hdr"]["format"]),
+            bit_depth=None if depth is None else int(depth),
+            sampling=None if sampling is None else str(sampling),
+            hdr_format=None if not isinstance(hdr, dict) else str(hdr["format"]),
         )

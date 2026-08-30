@@ -144,6 +144,32 @@ def test_a_v210_declaration_is_refused_unless_the_processor_sees_10bit_ycbcr() -
     )
 
 
+def test_a_link_that_publishes_nothing_is_reported_not_passed() -> None:
+    """SDI answers for none of the three fields.
+
+    The gate must neither crash on the absent keys nor read silence as
+    agreement: it comes back naming what it could not check, which is
+    what the session records and says out loud.
+    """
+    unverified = audit_wire_format(WireFormat.for_encoding(V210), InputMetadata())
+    assert unverified == ("bit depth", "sampling", "hdr signalling")
+
+
+def test_a_partly_published_link_audits_what_it_publishes() -> None:
+    """A field the processor answers is still a gate; only the silent ones pass."""
+    live = InputMetadata(bit_depth=10, sampling=None, hdr_format=None)
+    assert audit_wire_format(WireFormat.for_encoding(V210), live) == (
+        "sampling",
+        "hdr signalling",
+    )
+    with pytest.raises(ContractViolation) as e:
+        audit_wire_format(
+            WireFormat.for_encoding(V210),
+            InputMetadata(bit_depth=12, sampling=None, hdr_format=None),
+        )
+    assert "10-bit" in str(e.value) and "12-bit" in str(e.value)
+
+
 def test_pq_signalling_under_an_sdr_contract_refuses() -> None:
     live = InputMetadata(bit_depth=12, sampling="rgb", hdr_format="pq")
     with pytest.raises(ContractViolation) as e:

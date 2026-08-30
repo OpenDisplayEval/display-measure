@@ -63,6 +63,15 @@ class Patch:
     name: str
     rgb: tuple[int, int, int]
     role: str
+    wire_codes: tuple[int, int, int] | None = None
+    """Codes driven straight onto the wire, bypassing the encoding.
+
+    A patch is normally authored in RGB and encoded, which can only ever
+    produce codes inside the declared legal span. The range probe needs
+    the codes *outside* it — the ones that say whether the processor
+    reads the span the session declared — and no RGB triple expresses
+    those (§spec:measure-sessions).
+    """
 
 
 def _half_octave_ladder(floor: int, ceiling: int) -> tuple[int, ...]:
