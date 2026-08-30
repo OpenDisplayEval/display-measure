@@ -1,3 +1,11 @@
+# [1.2.0](https://github.com/OpenDisplayEval/display-measure/compare/v1.1.0...v1.2.0) (2026-08-30)
+
+
+### Features
+
+* **artifact:** record the wire encoding; schema measurements/2 ([3cec430](https://github.com/OpenDisplayEval/display-measure/commit/3cec43023f307f9751cb44b5c1a86ae45630b4e3))
+* **session:** declare the wire encoding per session ([0ee1705](https://github.com/OpenDisplayEval/display-measure/commit/0ee17055569d2296f7c2e8715a64e3f5404a4f9d))
+
 # [1.1.0](https://github.com/OpenDisplayEval/display-measure/compare/v1.0.0...v1.1.0) (2026-08-29)
 
 
