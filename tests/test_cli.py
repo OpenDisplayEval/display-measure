@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 from display_measure import session
 from display_measure.artifact import verify
 from display_measure.cli import app
-from display_measure.protocol import PROTOCOL_NAME
+from display_measure.protocol import VERIFY_SUITE
 from display_measure.wire import RGB12, V210
 
 runner = CliRunner()
@@ -103,7 +103,7 @@ def test_characterize_writes_one_seam_file_and_nothing_beside_it(
     assert [path.name for path in tmp_path.iterdir()] == ["measurements.csmf"]
 
     doc = projection(out)
-    assert doc["protocol"]["name"] == PROTOCOL_NAME
+    assert doc["protocol"]["name"] == VERIFY_SUITE.legacy_name
     assert doc["processor_state"]["eotf"]["type"] == "GAMMA"
     assert doc["instrument_routing"]["method"] == "four-color-matrix"
     # Every driven patch is a row, spectral where a spectrum exists.

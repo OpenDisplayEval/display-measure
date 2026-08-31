@@ -51,15 +51,15 @@ def test_ambient_raises_the_black_floor(device: MockBMDDeckLink) -> None:
     """The ambient knob lifts every reading — the hardware-free handle
     for §road:session-gates' over-budget refusal."""
     drive(device, (0, 0, 0))
-    dark = PlausibleDisplay(device).measure().XYZ[1]
-    lit = PlausibleDisplay(device, ambient=5.0).measure().XYZ[1]
+    dark = PlausibleDisplay(device, read_noise=0.0).measure().XYZ[1]
+    lit = PlausibleDisplay(device, ambient=5.0, read_noise=0.0).measure().XYZ[1]
     assert lit == pytest.approx(dark + 5.0)
 
 
 def test_white_lands_on_the_sample_peak_and_white_point(
     device: MockBMDDeckLink,
 ) -> None:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     drive(device, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE))
     reading = display.measure()
     assert float(reading.XYZ[1]) == pytest.approx(PEAK_LUMINANCE, rel=1e-9)
@@ -69,7 +69,7 @@ def test_white_lands_on_the_sample_peak_and_white_point(
 def test_black_is_the_sample_floor_at_the_white_chromaticity(
     device: MockBMDDeckLink,
 ) -> None:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     drive(device, (0, 0, 0))
     reading = display.measure()
     assert float(reading.XYZ[1]) == pytest.approx(BLACK_LEVEL, rel=1e-9)
@@ -79,7 +79,7 @@ def test_black_is_the_sample_floor_at_the_white_chromaticity(
 def test_full_drive_primaries_measure_the_sample_chromaticities(
     device: MockBMDDeckLink,
 ) -> None:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     # Black leakage pulls each primary toward white by parts in 1e5,
     # hence the loose-but-physical tolerance.
     for rgb, expected in (
@@ -92,7 +92,7 @@ def test_full_drive_primaries_measure_the_sample_chromaticities(
 
 
 def test_gray_follows_the_contract_gamma(device: MockBMDDeckLink) -> None:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     code = FULL_DRIVE // 2
     drive(device, (code, code, code))
     expected = BLACK_LEVEL + (code / FULL_DRIVE) ** DECODE_GAMMA * (
@@ -106,7 +106,7 @@ def test_the_display_decodes_the_declared_encoding(
 ) -> None:
     """A display receiving v210 decodes the codes on the wire; full-drive
     white rides narrow range exactly and lands on the sample peak."""
-    display = PlausibleDisplay(device, encoding=V210)
+    display = PlausibleDisplay(device, encoding=V210, read_noise=0.0)
     drive(device, encode_pixel(V210, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE)))
     assert float(display.measure().XYZ[1]) == pytest.approx(PEAK_LUMINANCE, rel=1e-6)
     assert xy_of(display) == pytest.approx(WHITE_XY, abs=1e-6)
@@ -115,7 +115,7 @@ def test_the_display_decodes_the_declared_encoding(
 def test_measure_refuses_before_any_frame_is_driven(
     device: MockBMDDeckLink,
 ) -> None:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     with pytest.raises(RuntimeError, match="frame"):
         display.measure()
 
@@ -130,7 +130,7 @@ def test_filter_mismatch_is_invertible_and_not_the_identity() -> None:
 def test_colorimeter_reads_the_display_through_the_mismatch(
     device: MockBMDDeckLink,
 ) -> None:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     colorimeter = MismatchedColorimeter(display)
     drive(device, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE))
     reading = colorimeter.measure().XYZ
@@ -142,7 +142,7 @@ def test_colorimeter_misreads_a_primary_chromaticity(
 ) -> None:
     """Filter mismatch bites hardest on narrow-band primaries — the
     error a four-color matrix exists to correct."""
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     colorimeter = MismatchedColorimeter(display)
     drive(device, (FULL_DRIVE, 0, 0))
     assert colorimeter.measure().xy != pytest.approx(display.measure().xy, abs=1e-3)
@@ -187,7 +187,7 @@ def test_the_spectrum_integrates_back_to_the_reading_beside_it(
 ) -> None:
     """A file whose spectra contradict its tristimulus is worse than one
     with no spectra at all."""
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     drive(device, rgb)
     reading = display.measure()
     assert integrate(reading.spectrum) == pytest.approx(reading.XYZ, rel=1e-9)
@@ -196,7 +196,7 @@ def test_the_spectrum_integrates_back_to_the_reading_beside_it(
 def test_the_display_reports_its_spectra_as_measured(
     device: MockBMDDeckLink,
 ) -> None:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     drive(device, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE))
     assert spectrum(display.measure()).provenance == SPECTRUM_MEASURED
 
@@ -206,6 +206,6 @@ def test_the_colorimeter_reports_no_spectrum_at_all(
 ) -> None:
     """Three filtered photodiodes have no spectrum to report, and the
     session records that rather than leaving the row silent."""
-    colorimeter = MismatchedColorimeter(PlausibleDisplay(device))
+    colorimeter = MismatchedColorimeter(PlausibleDisplay(device, read_noise=0.0))
     drive(device, (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE))
     assert spectrum(colorimeter.measure()).provenance == SPECTRUM_ABSENT

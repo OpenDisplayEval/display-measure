@@ -232,6 +232,15 @@ class SessionEnded(SessionEvent):
     detail: str = ""
 
 
+class UnreadablePatch(RuntimeError):
+    """Every attempt at one patch failed, so the artifact cannot be whole.
+
+    The artifact is all-or-nothing (§spec:artifact-chain): a session
+    with a hole in it is not a shorter session, it is one whose ramps
+    have a missing rung nothing downstream can see.
+    """
+
+
 class SessionCancelled(Exception):
     """Raised when a session stops on the caller's cancellation request.
 

@@ -243,13 +243,64 @@ an artifact nobody could trust.
 
 *Status: complete*
 
-The characterize protocol is fixed, versioned and device-referred:
-anchors, shadow-dense per-channel ramps, a gray tracking ramp and the
-additivity triad, in raw code values with no OCIO in the loop, since
-characterization precedes any config. MEASUREMENT.md is the
-human-readable definition of record, and `PROTOCOL_NAME` versions the
-two together. A change to the patch set, its spacing, or the
-presentation rule bumps the trailing number.
+Measurement decomposes into named, independently versioned **blocks**.
+A block names one thing worth measuring, states what reads it, and
+versions on its own. A session drives a composition of blocks; the
+artifact records which blocks at which versions; a consumer requires
+the blocks it reads. Codes are device-referred, raw, with no OCIO in
+the loop, since characterization precedes any config. MEASUREMENT.md is
+the human-readable definition of record.
+
+**Blocks rather than a versioned patch list, because a bundle cannot be
+reasoned about.** A single list mixes the measurements a model takes as
+input with the measurements that test the model, and the ones a report
+needs with the ones a config needs. Every addition bumps the bundle,
+which says nothing about what changed, and no consumer can state what
+it requires beyond a version that moves for reasons unrelated to it.
+Characterization grows; in a bundle, new characterization patches
+arrive indistinguishable from the verification patches already buried
+there.
+
+**Verification is named as verification.** The measurements that feed a
+model and the measurements that falsify it are different work with
+different consumers, and a step that does both under one name conceals
+which it is doing. An OCIO config reads the display's primaries, white
+point, black level and peak luminance; whether the channels add, and
+whether each follows the declared transfer function, is a separate
+question asked of the config's own assumptions. A config generates
+without those blocks — it just cannot be known to be wrong.
+
+**A suite is a label over a composition, not a thing.** It exists so an
+operator can say what a session is for without naming eight blocks. It
+is not what an artifact means, and it is not what a consumer matches
+on.
+
+**A consumer's analysis constrains its blocks, so a block is specified
+against the analysis.** The report filters patches against a noise
+floor measured as the *spread* of repeated black readings, and clusters
+measured error through the RGB volume. A single black reading makes
+that filter uncomputable rather than permissive; an axes-only patch set
+makes the volume clusters empty. Neither failure is visible on the
+rendered page — the report draws, and what it draws is wrong — so the
+block is derived from what reads it rather than from what a session can
+afford.
+
+**The conditions a measurement assumes travel with its block.** An LED
+panel measured on a run of solid patches is not the panel an operator
+drives: junction temperature settles somewhere a moving picture never
+takes it. A block therefore declares the warmup, inter-patch
+conditioning and read attempts its numbers assume, and a suite takes
+the strictest across what it composes. Composing a block brings its
+conditions rather than leaving them to the caller — a report measured
+without the conditioning its analysis was calibrated against is not a
+report with a caveat, but one describing a thermal state nothing else
+in the pipeline assumes. A session may override one, which is what a
+bench investigation needs and a comparable run does not do.
+
+**An artifact carries what its session measured and no more.** A
+composition without the response blocks yields an artifact with no
+response section — absent, not empty. An empty ramp reports an
+unmeasured thing as a measured one.
 
 Presentation is shuffled to decorrelate panel thermal drift from
 signal-level response. The shuffle is a sha256 sort keyed by the
@@ -294,15 +345,23 @@ Rendering is deterministic by construction: fixed key order, fixed
 nine-decimal float formatting below any instrument's repeatability, LF
 line endings, UTF-8.
 
-**Two strings are wire identifiers, not package names.** The artifact
+**The schema and protocol strings are wire identifiers, not package names.** The artifact
 schema is `color-wrangler/measurements/2` and the characterize
-protocol is `color-wrangler/characterize/3`. Both outlived the
+protocol string is `color-wrangler/characterize/3`. Both outlived the
 repository they were named in: the session core moved here and the
 strings did not follow it. Every promoted artifact carries them, and
 downstream loaders dispatch on them, so renaming either breaks the
 provenance of every artifact already promoted. They change only when
 the format they name changes: schema 2 added the wire encoding block,
 and a schema-1 artifact implied the bench's 12-bit RGB link.
+
+The protocol string is the one being retired. Artifacts record their
+measurement blocks and versions, which is what a consumer requires; the
+string survives only because ocio-display-gen matches it today and
+every artifact already promoted carries it. The `verify` composition —
+the blocks that protocol drove — carries it forward as a legacy name
+until `§road:ocio-reads-csmf` lands. No new composition claims one
+(MEASUREMENT.md).
 
 **The artifact is the seam file** (`§spec:measurement-seam`). It is
 CSMF, carrying the spectra behind each reading and its per-row

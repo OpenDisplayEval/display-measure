@@ -464,6 +464,12 @@ class MeasurementsArtifact:
     session_end: datetime
     wire_encoding: WireEncoding
     protocol_name: str | None = None
+    # The blocks the session drove, name and version each. This is what
+    # a consumer matches on: it states what an artifact actually
+    # carries, so a consumer can require the blocks it reads rather
+    # than a bundle version that moves for reasons unrelated to it
+    # (§spec:patch-protocol). `protocol_name` is the label beside it.
+    protocol_blocks: tuple[str, ...] | None = None
     presentation_order: tuple[str, ...] | None = None
     per_channel_response: PerChannelResponse | None = None
     gray_response: tuple[ResponsePoint, ...] | None = None
@@ -622,6 +628,15 @@ def _protocol_lines(artifact: MeasurementsArtifact) -> list[str]:
         "# order driven (§spec:sessions).",
         "protocol:",
         f'  name: "{artifact.protocol_name}"',
+    ]
+    if artifact.protocol_blocks is not None:
+        lines += [
+            "  # The measurement blocks this session drove, name and",
+            "  # version each. A consumer requires blocks, not a bundle.",
+            "  blocks:",
+            *(f'    - "{block}"' for block in artifact.protocol_blocks),
+        ]
+    lines += [
         "  presentation_order:",
         *(f'    - "{name}"' for name in artifact.presentation_order),
     ]
@@ -895,11 +910,19 @@ def verify(path: Path) -> str:
             f"{recorded} and its projection digests to {recomputed}"
         )
     rows = len(loaded.measurements)
-    order = projection.count('\n    - "')
-    if order and rows != order:
+    # Parsed, not pattern-counted. This counted every `    - "` line in
+    # the projection, which silently meant "the driven order" only for
+    # as long as nothing else was a list at that indentation — adding
+    # the block list broke it, and the failure looked like a corrupt
+    # artifact rather than a miscount.
+    import yaml
+
+    document = yaml.safe_load(projection) or {}
+    driven = (document.get("protocol") or {}).get("presentation_order") or []
+    if driven and rows != len(driven):
         raise ValueError(
             f"{path} does not verify: it carries {rows} measurement rows "
-            f"against {order} patches in the driven order"
+            f"against {len(driven)} patches in the driven order"
         )
     return recomputed
 

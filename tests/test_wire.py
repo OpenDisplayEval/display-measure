@@ -9,7 +9,7 @@ import pytest
 
 from display_measure.artifact import WireEncoding
 from display_measure.processor import WireFormat
-from display_measure.protocol import FULL_DRIVE, protocol_patches
+from display_measure.protocol import FULL_DRIVE, VERIFY_SUITE
 from display_measure.wire import RGB12, V210, WIRE_ENCODINGS, decode_pixel, encode_pixel
 
 WHITE = (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE)
@@ -21,7 +21,7 @@ NARROW_BLACK, NARROW_WHITE, CHROMA_MID = 64, 940, 512
 def test_the_default_encoding_is_the_identity_over_12bit_rgb() -> None:
     """What the bench drives today: the frame is `Patch.rgb`, untouched."""
     assert RGB12.identity and RGB12.legal_codes == (("rgb", 0, FULL_DRIVE),)
-    for patch in protocol_patches():
+    for patch in VERIFY_SUITE.patches:
         assert encode_pixel(RGB12, patch.rgb) == patch.rgb
 
 
