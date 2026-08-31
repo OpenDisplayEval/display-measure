@@ -143,7 +143,7 @@ wheels = [
 [[package]]
 name = "colour-specio"
 version = "0.4.2a0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/repentsinner/colour-specio?rev=981d48627c7b2a02e14897500fa1a67da8f61c8a#981d48627c7b2a02e14897500fa1a67da8f61c8a" }
 dependencies = [
     { name = "aenum" },
     { name = "bidict" },
@@ -152,10 +152,6 @@ dependencies = [
     { name = "protobuf" },
     { name = "pyserial" },
     { name = "xxhash" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/04/3cdca7bcd73747a5783e6548e74bdef20e5a3517ea4fc688cded6ae7f936/colour_specio-0.4.2a0.tar.gz", hash = "sha256:5bfc77f5cda7decf3e5d227fe8be787e3f973347b40f3f3c8efcfd2bd74909ef", size = 26647649, upload-time = "2025-07-19T21:15:33.876Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/5f/374be6088671ba2c4d2804b3aba65bdb41dff17174ec837ad3858d23d9c3/colour_specio-0.4.2a0-py3-none-any.whl", hash = "sha256:4a36d94fa7eba5b07d955fff3d43cd5051ef74d8da012596edd185f49ea7f3b6", size = 41206, upload-time = "2025-07-19T21:15:19.858Z" },
 ]
 
 [[package]]
@@ -182,7 +178,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bmd-signal-generator", git = "https://github.com/OpenLEDEval/bmd-signal-gen?tag=v0.2.1" },
-    { name = "colour-specio", specifier = "==0.4.2a0" },
+    { name = "colour-specio", git = "https://github.com/repentsinner/colour-specio?rev=981d48627c7b2a02e14897500fa1a67da8f61c8a" },
     { name = "numpy", specifier = ">=2.3.1" },
     { name = "pypixelpack", git = "https://github.com/Fuse-Technical-Group/pypixelpack?rev=82e249e4531df297e0b81099e2b24eb08190a8d6" },
     { name = "pyyaml", specifier = ">=6.0.1" },

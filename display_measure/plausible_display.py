@@ -26,7 +26,12 @@ import numpy as np
 import numpy.typing as npt
 from bmd_sg.decklink import PixelFormatType
 
-from display_measure.artifact import DECLARED_CONTRACT, WireEncoding
+from display_measure.artifact import (
+    DECLARED_CONTRACT,
+    SPECTRUM_MEASURED,
+    Spectrum,
+    WireEncoding,
+)
 from display_measure.instrument import XYZReading
 from display_measure.wire import RGB12, decode_pixel
 
@@ -85,6 +90,62 @@ def _primary_columns() -> npt.NDArray[np.float64]:
 _PRIMARY_XYZ = _primary_columns()
 
 
+# The double's spectrum: three Gaussian emitters at LED peak wavelengths
+# and widths, on the 5 nm grid a spectroradiometer reports
+# (§spec:spectral-retention). Narrow-band by construction, because that
+# is the shape whose filter mismatch the disciplined colorimeter exists
+# to correct and whose drive-invariance a reconstruction rests on.
+SPECTRAL_START = 380.0
+SPECTRAL_END = 780.0
+SPECTRAL_STEP = 5.0
+EMITTER_PEAKS = ((625.0, 12.0), (535.0, 18.0), (462.0, 12.0))
+
+WAVELENGTHS = np.arange(SPECTRAL_START, SPECTRAL_END + SPECTRAL_STEP / 2, SPECTRAL_STEP)
+
+# Each basis emitter's absolute XYZ, columns in EMITTER_PEAKS order,
+# under CIE 1931 with k=683 (ASTM E308). Stated rather than computed so
+# the default session path keeps colour-science off the wiring, as
+# `_unit_xyz` does; `test_plausible_display` recomputes it against
+# colour and fails if the two drift.
+BASIS_XYZ = np.array(
+    [
+        (15082.476283165426, 8125.4529167550845, 5156.789441538233),
+        (6826.31308060386, 25762.78106545038, 1507.5629252862532),
+        (3.3668960564538315, 1743.367517703671, 30205.470483608013),
+    ]
+)
+
+
+def _spd_from_xyz() -> npt.NDArray[np.float64]:
+    """The map from a reading's XYZ to the emitter spectrum behind it.
+
+    A metamer, not a datasheet: the double models a display's
+    tristimulus, and this reconstructs the three-emitter spectrum that
+    integrates back to it exactly, so the spectra the double writes
+    never contradict the readings beside them. Its tails dip a few parts
+    in ten thousand of peak below zero where the sample's primaries are
+    not exactly reachable from three Gaussians — kept rather than
+    clipped, because clipping would break that identity and a real
+    instrument's out-of-band bins go slightly negative too.
+    """
+    basis = np.column_stack(
+        [np.exp(-0.5 * ((WAVELENGTHS - c) / s) ** 2) for c, s in EMITTER_PEAKS]
+    )
+    return np.asarray(basis @ np.linalg.inv(BASIS_XYZ), dtype=np.float64)
+
+
+_SPD_FROM_XYZ = _spd_from_xyz()
+
+
+def emitter_spectrum(xyz: npt.NDArray[np.float64]) -> Spectrum:
+    """The measured spectrum the double reports for a reading."""
+    return Spectrum(
+        wavelengths=tuple(float(w) for w in WAVELENGTHS),
+        values=tuple(float(v) for v in _SPD_FROM_XYZ @ xyz),
+        provenance=SPECTRUM_MEASURED,
+    )
+
+
 class FrameSource(Protocol):
     """The slice of the mock DeckLink's public surface the display reads."""
 
@@ -130,7 +191,10 @@ class PlausibleDisplay:
         # A spot instrument aimed at the display center.
         spot = frame[frame.shape[0] // 2, frame.shape[1] // 2]
         linear = decode_pixel(self._encoding, spot) ** DECODE_GAMMA
-        return XYZReading(XYZ=self._ambient_xyz + _BLACK_XYZ + _PRIMARY_XYZ @ linear)
+        xyz = self._ambient_xyz + _BLACK_XYZ + _PRIMARY_XYZ @ linear
+        # A spectroradiometer's reading: the spectrum is measured, and
+        # it integrates back to the XYZ beside it.
+        return XYZReading(XYZ=xyz, spectrum=emitter_spectrum(xyz))
 
 
 # The colorimeter's filter/observer mismatch, as the fixed 3x3 relating
@@ -155,6 +219,10 @@ class MismatchedColorimeter:
     Satisfies the session's ``Instrument`` protocol. Deterministic, and
     it shares the display, so a hybrid session's two instruments always see
     the same driven frame.
+
+    Its readings carry no spectrum, because a colorimeter has none: it
+    is three filtered photodiodes. That absence is what a reconstruction
+    fills (:mod:`display_measure.hybrid`).
     """
 
     manufacturer = "display-measure"

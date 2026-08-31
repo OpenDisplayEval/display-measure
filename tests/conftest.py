@@ -17,9 +17,11 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
+import yaml
 from bmd_sg.decklink import MockBMDDeckLink, PixelFormatType
 
 from display_measure.events import SessionEvent
@@ -27,6 +29,29 @@ from display_measure.session import Clock, doubles_session
 from display_measure.wire import V210
 
 FIXED_TIME = datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC)
+
+
+def projection(path: Path) -> dict[str, Any]:
+    """The seam file's provenance block, parsed.
+
+    The artifact's canonical projection rides in CSMF's ancillary field
+    (§spec:measurements-artifact), so this is where the fields that used
+    to be the YAML artifact now live. Assertions read it rather than the
+    protobuf, which is the point of the block.
+    """
+    from specio.serialization.csmf import load_csmf_file
+
+    from display_measure.artifact import carried_projection
+
+    _, text = carried_projection(load_csmf_file(path).ancillary)
+    return cast("dict[str, Any]", yaml.safe_load(text))
+
+
+def rows(path: Path) -> list[Any]:
+    """The seam file's measurement rows, in driven order."""
+    from specio.serialization.csmf import load_csmf_file
+
+    return list(load_csmf_file(path).measurements)
 
 
 @pytest.fixture
@@ -53,7 +78,7 @@ def display_run(
     fixed_clock: Clock,
 ) -> tuple[Path, str, MockBMDDeckLink]:
     """One plausible-display session: artifact path, captured log, closed device."""
-    out = tmp_path_factory.mktemp("display") / "measurements.yaml"
+    out = tmp_path_factory.mktemp("display") / "measurements.csmf"
     # The package logger, not just the session module: the contract audit
     # narrates from display_measure.processor and is a session stage.
     logger = logging.getLogger("display_measure")
@@ -75,7 +100,7 @@ def v210_run(
     tmp_path_factory: pytest.TempPathFactory, fixed_clock: Clock
 ) -> tuple[Path, MockBMDDeckLink]:
     """One doubles session over the v210 link: artifact path and device."""
-    out = tmp_path_factory.mktemp("v210") / "measurements.yaml"
+    out = tmp_path_factory.mktemp("v210") / "measurements.csmf"
     device = doubles_session(out, clock=fixed_clock, settle_seconds=0.0, encoding=V210)
     return (out, device)
 
@@ -101,7 +126,7 @@ def display_events(
     fixed_clock: Clock,
 ) -> tuple[tuple[SessionEvent, ...], Path]:
     """One plausible-display session collected as events: the stream and its artifact."""
-    out = tmp_path_factory.mktemp("events") / "measurements.yaml"
+    out = tmp_path_factory.mktemp("events") / "measurements.csmf"
     collected: list[SessionEvent] = []
     doubles_session(out, clock=fixed_clock, settle_seconds=0.0, emit=collected.append)
     return tuple(collected), out
@@ -129,7 +154,7 @@ def hybrid_artifact(
     full_ramp_threshold: float,
 ) -> Path:
     """One disciplined-colorimeter session over the same display double."""
-    out = tmp_path_factory.mktemp("hybrid") / "measurements.yaml"
+    out = tmp_path_factory.mktemp("hybrid") / "measurements.csmf"
     doubles_session(
         out,
         clock=fixed_clock,
@@ -137,4 +162,22 @@ def hybrid_artifact(
         hybrid=True,
         luminance_threshold=full_ramp_threshold,
     )
+    return out
+
+
+@pytest.fixture(scope="session")
+def routed_hybrid_artifact(
+    tmp_path_factory: pytest.TempPathFactory,
+    fixed_clock: Clock,
+) -> Path:
+    """One hybrid session at the shipped routing threshold — the split a
+    real rig runs, where the bright patches land on the
+    spectroradiometer and the dark rungs on the disciplined colorimeter.
+
+    `hybrid_artifact` forces every row to the colorimeter to check the
+    correction; this one is what the CLI's default drives, so it is the
+    fixture that carries all three spectral provenances at once.
+    """
+    out = tmp_path_factory.mktemp("routed") / "measurements.csmf"
+    doubles_session(out, clock=fixed_clock, settle_seconds=0.0, hybrid=True)
     return out

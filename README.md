@@ -7,6 +7,13 @@ signal chain, reads the emitted light with a spectroradiometer or
 colorimeter, and writes an immutable measurement file. It is the one
 tool in the pipeline that touches instruments and signal hardware.
 
+The file is CSMF (`.csmf`): the tristimulus and the spectrum behind
+every row, each row naming whether its spectrum was measured,
+reconstructed or absent, with the declared contract, the attested
+panel state, the protocol and the hash chain in the provenance block
+its ancillary field carries. One file at the seam
+(§spec:measurements-artifact).
+
 ## Why the gates
 
 A measurement is only worth the conditions it was taken under, and

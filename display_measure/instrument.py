@@ -7,6 +7,15 @@ without subclassing, and so do this package's doubles
 (:mod:`display_measure.hybrid`). `XYZReading` is the concrete reading a
 synthesized or corrected measurement returns — the one shape every
 producer here needs, so none of them roll their own.
+
+The seam is wider than tristimulus: a reading carries the spectrum
+behind it, or says it has none (§spec:spectral-retention). That widening
+is an accessor (`spectrum`) rather than a member of `InstrumentReading`,
+because a colorimeter reading legitimately has no spectrum and could not
+then satisfy the protocol — the same reason `identity` reads firmware
+optionally. colour-specio names the field `spd` on its spectral
+measurement and omits it entirely on its colorimetric one; the accessor
+reconciles both with this package's own readings.
 """
 
 from dataclasses import dataclass
@@ -15,7 +24,12 @@ from typing import Protocol
 import numpy as np
 import numpy.typing as npt
 
-from display_measure.artifact import InstrumentIdentity
+from display_measure.artifact import (
+    ABSENT_SPECTRUM,
+    SPECTRUM_MEASURED,
+    InstrumentIdentity,
+    Spectrum,
+)
 
 __all__ = [
     "Instrument",
@@ -24,6 +38,7 @@ __all__ = [
     "chromaticity",
     "identity",
     "luminance",
+    "spectrum",
     "triple",
     "xyz",
 ]
@@ -56,15 +71,19 @@ class Instrument(Protocol):
 
 @dataclass(frozen=True, eq=False)
 class XYZReading:
-    """A reading carried as absolute XYZ alone (cd/m²).
+    """A reading carried as absolute XYZ (cd/m²) and its spectrum.
 
     Satisfies `InstrumentReading`. `xy` matches ``colour.XYZ_to_xy``
     for the positive XYZ a lit or leaking display produces; hand-rolled
     so the default session path keeps colour-science (and its ~0.8 s
     import) off the wiring.
+
+    `spectrum` defaults to absent, which is what a corrected colorimeter
+    reading carries until something reconstructs one for it.
     """
 
     XYZ: npt.NDArray[np.float64]
+    spectrum: Spectrum = ABSENT_SPECTRUM
 
     @property
     def xy(self) -> npt.NDArray[np.float64]:
@@ -85,6 +104,29 @@ def xyz(measurement: InstrumentReading) -> tuple[float, float, float]:
 def luminance(measurement: InstrumentReading) -> float:
     """The reading's absolute luminance (cd/m²) — Y of XYZ."""
     return float(measurement.XYZ[1])
+
+
+def spectrum(measurement: InstrumentReading) -> Spectrum:
+    """The spectral distribution behind the reading (§spec:spectral-retention).
+
+    Returns `ABSENT_SPECTRUM` for a reading that carries none — a
+    colorimeter's, or a double that models tristimulus only. Absent is a
+    recorded fact, not a missing field: an analysis needing a real
+    spectrum has to be able to tell which rows lack one.
+    """
+    carried = getattr(measurement, "spectrum", None)
+    if isinstance(carried, Spectrum):
+        return carried
+    # colour-specio's SPDMeasurement; its ColorimeterMeasurement has no
+    # such attribute, which is the whole reason this is read optionally.
+    spd = getattr(measurement, "spd", None)
+    if spd is None:
+        return ABSENT_SPECTRUM
+    return Spectrum(
+        wavelengths=tuple(float(w) for w in spd.wavelengths),
+        values=tuple(float(v) for v in spd.values),
+        provenance=SPECTRUM_MEASURED,
+    )
 
 
 def chromaticity(measurement: InstrumentReading) -> tuple[float, float]:

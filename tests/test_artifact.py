@@ -1,17 +1,24 @@
 """Measurements-artifact tests: shape, determinism, immutability."""
 
+import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 import yaml
+from specio.serialization.csmf import load_csmf_file, save_csmf_file
 
 from display_measure.artifact import (
+    ABSENT_SPECTRUM,
     DECLARED_CONTRACT,
     SCHEMA,
+    SEAM_SUFFIX,
     SOURCE_COLORIMETER,
     SOURCE_SPECTRORADIOMETER,
+    SPECTRUM_ABSENT,
+    SPECTRUM_MEASURED,
+    SPECTRUM_RECONSTRUCTED,
     AdditivityTriad,
     InstrumentIdentity,
     InstrumentRouting,
@@ -19,7 +26,11 @@ from display_measure.artifact import (
     PerChannelResponse,
     ProcessorStateSnapshot,
     ResponsePoint,
+    Spectrum,
+    carried_projection,
+    digest,
     render,
+    verify,
     write,
 )
 from display_measure.wire import RGB12, V210, encode_pixel
@@ -111,21 +122,6 @@ def test_naive_timestamps_are_refused() -> None:
         )
 
 
-def test_write_refuses_to_overwrite(tmp_path: Path) -> None:
-    a = sample_artifact()
-    out = tmp_path / "measurements.yaml"
-    write(a, out)
-    with pytest.raises(FileExistsError):
-        write(a, out)
-
-
-def test_write_emits_rendered_bytes(tmp_path: Path) -> None:
-    a = sample_artifact()
-    out = tmp_path / "measurements.yaml"
-    write(a, out)
-    assert out.read_bytes() == render(a).encode("utf-8")
-
-
 def full_protocol_artifact() -> MeasurementsArtifact:
     point = ResponsePoint(code=16, xyz=(0.1, 0.2, 0.3))
     ramp = (point, ResponsePoint(code=3072, xyz=(900.0, 1000.0, 1100.0)))
@@ -134,6 +130,8 @@ def full_protocol_artifact() -> MeasurementsArtifact:
         protocol_name="color-wrangler/characterize/1",
         presentation_order=("black", "gray_0016", "white"),
         wire_codes=((0, 0, 0), (16, 16, 16), (4095, 4095, 4095)),
+        driven_codes=((0, 0, 0), (16, 16, 16), (4095, 4095, 4095)),
+        readings=((0.004, 0.005, 0.006), (0.1, 0.2, 0.3), (900.0, 1000.0, 1100.0)),
         per_channel_response=PerChannelResponse(red=ramp, green=ramp, blue=ramp),
         gray_response=ramp,
         additivity=AdditivityTriad(
@@ -368,3 +366,187 @@ class TestRenderableStrings:
     def test_the_intensity_field_is_guarded_too(self) -> None:
         with pytest.raises(ValueError, match="intensity"):
             replace(DECLARED_CONTRACT, intensity='1800" nits\n  injected: "yes')
+
+
+def spectral_artifact() -> MeasurementsArtifact:
+    """A three-row artifact carrying one row of each provenance."""
+    # Seven rungs: colour's interpolators refuse fewer than six.
+    measured = Spectrum(
+        wavelengths=(380.0, 385.0, 390.0, 395.0, 400.0, 405.0, 410.0),
+        values=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7),
+        provenance=SPECTRUM_MEASURED,
+    )
+    return replace(
+        full_protocol_artifact(),
+        spectra=(
+            measured,
+            replace(
+                measured,
+                values=(0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07),
+                provenance=SPECTRUM_RECONSTRUCTED,
+                derived_across=(0.5, 512.0),
+            ),
+            ABSENT_SPECTRUM,
+        ),
+    )
+
+
+def test_every_row_names_how_its_spectrum_was_obtained() -> None:
+    """Provenance is per row, not per file (§spec:spectral-retention)."""
+    rows = yaml.safe_load(render(spectral_artifact()))["spectra"]
+    assert [row["provenance"] for row in rows] == [
+        SPECTRUM_MEASURED,
+        SPECTRUM_RECONSTRUCTED,
+        SPECTRUM_ABSENT,
+    ]
+
+
+def test_a_reconstructed_row_names_the_luminance_span_it_came_from() -> None:
+    row = yaml.safe_load(render(spectral_artifact()))["spectra"][1]
+    assert row["derived_across"] == pytest.approx([0.5, 512.0])
+
+
+def test_an_absent_row_carries_no_samples_and_no_span() -> None:
+    row = yaml.safe_load(render(spectral_artifact()))["spectra"][2]
+    assert row == {"provenance": SPECTRUM_ABSENT}
+
+
+def test_the_projection_digests_the_samples_rather_than_restating_them() -> None:
+    """The projection is the hashing basis, so it covers the spectra the
+    seam file carries — by digest, since restating tens of thousands of
+    samples would bloat every artifact."""
+    artifact = spectral_artifact()
+    assert artifact.spectra is not None
+    rows = yaml.safe_load(render(artifact))["spectra"]
+    assert rows[0]["samples"] == 7
+    assert rows[0]["sha256"] == artifact.spectra[0].digest
+    assert rows[0]["sha256"] != rows[1]["sha256"]
+
+
+def test_spectra_parallel_the_presentation_order() -> None:
+    with pytest.raises(ValueError, match="spectra"):
+        replace(full_protocol_artifact(), spectra=(ABSENT_SPECTRUM,))
+
+
+def test_a_spectrum_states_one_provenance_consistently() -> None:
+    with pytest.raises(ValueError, match="absent"):
+        Spectrum(wavelengths=(), values=(), provenance=SPECTRUM_MEASURED)
+    with pytest.raises(ValueError, match="derived_across"):
+        Spectrum(
+            wavelengths=(380.0,),
+            values=(1.0,),
+            provenance=SPECTRUM_MEASURED,
+            derived_across=(1.0, 2.0),
+        )
+    with pytest.raises(ValueError, match="as many values as wavelengths"):
+        Spectrum(wavelengths=(380.0,), values=(), provenance=SPECTRUM_MEASURED)
+
+
+def test_skeleton_artifacts_render_no_spectra_block() -> None:
+    assert "spectra" not in yaml.safe_load(render(sample_artifact()))
+
+
+class TestSeamFile:
+    """One file at the seam: CSMF plus the provenance block it carries.
+
+    CSMF models the rows; everything else — the contract, the panel
+    state, the protocol, the instrument, the wire — rides in the bytes
+    its reserved ancillary field holds (§spec:measurement-seam).
+    """
+
+    def written(self, tmp_path: Path) -> tuple[Path, str]:
+        out = tmp_path / "measurements.csmf"
+        return out, write(spectral_artifact(), out)
+
+    def test_a_path_that_is_not_a_csmf_is_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match=SEAM_SUFFIX):
+            write(spectral_artifact(), tmp_path / "measurements.yaml")
+
+    def test_an_artifact_with_no_rows_is_not_a_seam_file(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="rows"):
+            write(sample_artifact(), tmp_path / "measurements.csmf")
+
+    def test_the_seam_file_is_immutable_once_written(self, tmp_path: Path) -> None:
+        out, _ = self.written(tmp_path)
+        with pytest.raises(FileExistsError):
+            write(spectral_artifact(), out)
+
+    def test_every_driven_row_comes_back_in_order(self, tmp_path: Path) -> None:
+        """Order is load-bearing: `order` and `test_colors` index the
+        measurement list positionally."""
+        out, _ = self.written(tmp_path)
+        loaded = load_csmf_file(out)
+        artifact = spectral_artifact()
+        assert artifact.readings is not None
+        assert len(loaded.measurements) == len(artifact.readings)
+        assert [tuple(colour) for colour in loaded.test_colors] == list(
+            artifact.driven_codes or ()
+        )
+        for row, xyz in zip(loaded.measurements, artifact.readings, strict=True):
+            recorded = row.XYZ
+            assert recorded == pytest.approx(xyz)
+
+    def test_a_row_with_a_spectrum_is_spectral_and_one_without_is_not(
+        self, tmp_path: Path
+    ) -> None:
+        """CSMF already tells a spectral row from a colorimetric one, so
+        the format needs no extension — only the provenance naming which
+        of the spectral rows was measured."""
+        out, _ = self.written(tmp_path)
+        rows = load_csmf_file(out).measurements
+        assert [hasattr(row, "spd") for row in rows] == [True, True, False]
+        assert rows[0].spd.values == pytest.approx([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7])
+
+    def test_a_reconstructed_row_keeps_the_tristimulus_that_was_measured(
+        self, tmp_path: Path
+    ) -> None:
+        """A reconstruction carries its anchor's chromaticity by
+        construction; overwriting the measured value with it would
+        launder an estimate into a measurement."""
+        out, _ = self.written(tmp_path)
+        artifact = spectral_artifact()
+        assert artifact.readings is not None
+        recorded = load_csmf_file(out).measurements[1].XYZ
+        assert recorded == pytest.approx(artifact.readings[1])
+
+    def test_the_provenance_block_carries_what_csmf_does_not_model(
+        self, tmp_path: Path
+    ) -> None:
+        out, _ = self.written(tmp_path)
+        doc = yaml.safe_load(carried_projection(load_csmf_file(out).ancillary)[1])
+        assert doc["schema"] == SCHEMA
+        assert doc["protocol"]["name"] == "color-wrangler/characterize/1"
+        assert doc["processor_state"]["eotf"]["gamma_value"] == pytest.approx(2.4)
+        assert doc["wire_encoding"]["layout"] == RGB12.layout
+        assert doc["instrument"]["model"] == "Virtual Random Spectrometer"
+
+    def test_the_digest_covers_the_projection_not_the_file_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        out, written = self.written(tmp_path)
+        assert written == digest(render(spectral_artifact()))
+        assert written != hashlib.sha256(out.read_bytes()).hexdigest()
+
+    def test_the_digest_survives_a_re_serialization_that_preserves_content(
+        self, tmp_path: Path
+    ) -> None:
+        """The Verify criterion. Protobuf guarantees round-trip, not a
+        canonical encoding, so the file's own bytes may move; the digest
+        may not."""
+        out, written = self.written(tmp_path)
+        again = tmp_path / "again.csmf"
+        save_csmf_file(again, load_csmf_file(out))
+        assert verify(again) == written
+
+    def test_a_file_whose_projection_was_tampered_with_does_not_verify(
+        self, tmp_path: Path
+    ) -> None:
+        out, _ = self.written(tmp_path)
+        loaded = load_csmf_file(out)
+        loaded.ancillary = loaded.ancillary.replace(
+            b"1000.000000000", b"1800.000000000"
+        )
+        tampered = tmp_path / "tampered.csmf"
+        save_csmf_file(tampered, loaded)
+        with pytest.raises(ValueError, match="does not verify"):
+            verify(tampered)

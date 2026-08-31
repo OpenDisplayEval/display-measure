@@ -57,33 +57,31 @@ non-zero naming the field, before any patch is driven.
 ## Self-describing measurement seam §road:measurement-seam
 
 The measure and validate layers meet at one file that states what
-produced it. Upstream: `§road:measurement-seam`.
+produced it. Upstream: `§road:measurement-seam`. CSMF replaced the
+YAML artifact, so this section retired a format as well as adding one:
+`display-measure characterize` writes one `.csmf` carrying the spectra
+and their per-row provenance, with everything CSMF does not model in
+the provenance block its ancillary field holds.
 
-### Retain spectra with per-row provenance §road:spectral-provenance
+**Downstream consumers read the old format.** ocio-display-gen loads
+the YAML artifact this layer no longer writes, so the two are out of
+step until `§road:ocio-reads-csmf` lands there; the same file is what
+`§road:read-seam-file` unblocks in display-report.
 
-Keep the spectral distribution behind each reading and record whether
-it was measured, reconstructed or absent.
-§spec:measurements-artifact.
+### Revert the colour-specio pin §road:specio-pin-revert
 
-### Reconstruct shadow spectra §road:spectral-reconstruction
-
-Give colorimeter-routed rows a spectrum scaled from the bright-regime
-measurement of the same stimulus, naming the luminance span it was
-derived across. §spec:measurements-artifact. Depends on
-§road:spectral-provenance.
-
-### Emit the seam file §road:emit-csmf
-
-Write CSMF carrying the spectra, protocol name, declared signal
-contract, attested panel state and input hashes.
-§spec:measurements-artifact. Depends on §road:spectral-provenance.
+Return `colour-specio` to its released PyPI pin once the CSMF loader
+fix merges upstream, in `pyproject.toml`. §spec:scope.
 
 ### Report-grade protocol tier §road:report-grade-protocol
 
 Add the named protocol tier carrying the colour cube, random samples
-and black/white repeats a distribution needs. §spec:patch-protocol.
+and black/white repeats a distribution needs, in
+`display_measure/protocol.py` and MEASUREMENT.md. §spec:patch-protocol.
 
 **Verify:** a file written by `display-measure characterize` names the
-protocol and transfer function it was measured under, and its
+protocol and transfer function it was measured under; its
 reconstructed rows are named so an analysis needing a measured
-spectrum can exclude them.
+spectrum can exclude them; its digest verifies after a re-serialization
+that preserves content; and `display-report analyze` reads it with no
+conversion step.

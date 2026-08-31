@@ -59,9 +59,13 @@ import numpy as np
 import numpy.typing as npt
 
 from display_measure.artifact import (
+    ABSENT_SPECTRUM,
     SOURCE_COLORIMETER,
     SOURCE_SPECTRORADIOMETER,
+    SPECTRUM_MEASURED,
+    SPECTRUM_RECONSTRUCTED,
     InstrumentRouting,
+    Spectrum,
 )
 from display_measure.instrument import (
     Instrument,
@@ -69,8 +73,10 @@ from display_measure.instrument import (
     XYZReading,
     identity,
     luminance,
+    spectrum,
     triple,
 )
+from display_measure.protocol import WHITE_PATCH
 
 __all__ = [
     "DEFAULT_LUMINANCE_THRESHOLD",
@@ -80,6 +86,7 @@ __all__ = [
     "HybridInstrument",
     "audit_derivation",
     "four_color_matrix",
+    "stimulus_family",
 ]
 
 log = logging.getLogger("display_measure.session")
@@ -124,6 +131,20 @@ DERIVATION_PATCHES = ("red_2048", "green_2048", "blue_2048")
 # spectroradiometer integrates quickly, below it the exposure is what
 # makes a session take twenty minutes.
 DEFAULT_LUMINANCE_THRESHOLD = 10.0
+
+
+# A patch's stimulus family: the emitter mixture it drives, which is
+# what its spectrum belongs to. A ramp rung shares one with the
+# full-drive patch of the same mixture, and that full-drive patch is the
+# bright-regime reading of "the same stimulus" a reconstruction scales
+# from (§spec:spectral-retention). The gray ramp's mixture is white's.
+_FAMILY_ALIASES = {"gray": WHITE_PATCH}
+
+
+def stimulus_family(patch: str) -> str:
+    """The emitter mixture `patch` drives, by protocol naming."""
+    head = patch.split("_", 1)[0]
+    return _FAMILY_ALIASES.get(head, head)
 
 
 class DerivationRefused(RuntimeError):
@@ -271,6 +292,10 @@ class HybridInstrument:
         self._pairs: list[tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]] = []
         self._matrix: npt.NDArray[np.float64] | None = None
         self._sources: list[str] = []
+        # The brightest measured spectrum seen per stimulus family, with
+        # the luminance it was read at — what a colorimeter-routed row of
+        # that family reconstructs from.
+        self._anchors: dict[str, tuple[Spectrum, float]] = {}
 
     @property
     def serial_number(self) -> str:
@@ -299,18 +324,21 @@ class HybridInstrument:
         probe = self._probe()
         if probe is None:
             return self._from_spectroradiometer(patch, note=" (colorimeter over range)")
-        corrected = XYZReading(XYZ=self._matrix @ probe)
-        if luminance(corrected) >= self._threshold:
+        corrected = self._matrix @ probe
+        level = float(corrected[1])
+        if level >= self._threshold:
             return self._from_spectroradiometer(patch)
         self._sources.append(SOURCE_COLORIMETER)
         log.info(
             "instrument route: %s -> disciplined colorimeter (%.4f cd/m², "
             "under the %.4f threshold)",
             patch,
-            luminance(corrected),
+            level,
             self._threshold,
         )
-        return corrected
+        # The tristimulus is the colorimeter's, corrected; the spectrum
+        # beside it is reconstructed, and says so.
+        return XYZReading(XYZ=corrected, spectrum=self._reconstruct(patch, level))
 
     def measure(self) -> InstrumentReading:
         """Satisfy `Instrument` for callers that drive no named patch.
@@ -362,7 +390,57 @@ class HybridInstrument:
     def _from_spectroradiometer(self, patch: str, note: str = "") -> InstrumentReading:
         self._sources.append(SOURCE_SPECTRORADIOMETER)
         log.info("instrument route: %s -> spectroradiometer%s", patch, note)
-        return self._spectroradiometer.measure()
+        reading = self._spectroradiometer.measure()
+        self._remember(patch, reading)
+        return reading
+
+    def _remember(self, patch: str, reading: InstrumentReading) -> None:
+        """Hold the brightest measured spectrum of each stimulus family.
+
+        Brightest, because that is the reading a reconstruction is least
+        extrapolated from, and because the reference instrument's own
+        noise rises as its integration time explodes at the dark end.
+        """
+        measured = spectrum(reading)
+        if measured.provenance != SPECTRUM_MEASURED:
+            return
+        level = luminance(reading)
+        family = stimulus_family(patch)
+        held = self._anchors.get(family)
+        if held is None or level > held[1]:
+            self._anchors[family] = (measured, level)
+
+    def _reconstruct(self, patch: str, level: float) -> Spectrum:
+        """The spectrum for a colorimeter-routed row (§spec:spectral-retention).
+
+        A colorimeter has no spectrum, so the best a row can carry is the
+        bright-regime measurement of the same stimulus scaled to the
+        luminance this row measured. That is legitimate to the degree an
+        emitter's spectral shape is drive-invariant, which is the same
+        assumption the in-session correction already rests on: under
+        pulse-width modulation the duty cycle varies and the
+        instantaneous spectrum does not. It weakens across a wide drive
+        range as junction temperature shifts the peak wavelength, most
+        visibly on blue — so the row names the luminance span the
+        scaling reached across and a reader can judge it.
+
+        A family no instrument read spectrally leaves the row absent.
+        Black is the standing case: it is panel leakage plus reflected
+        ambient, not a dimmer white, so no measured row stands in for it.
+        """
+        anchor = self._anchors.get(stimulus_family(patch))
+        if anchor is None:
+            return ABSENT_SPECTRUM
+        measured, at_level = anchor
+        if not math.isfinite(level) or level <= 0.0 or at_level <= 0.0:
+            return ABSENT_SPECTRUM
+        scale = level / at_level
+        return Spectrum(
+            wavelengths=measured.wavelengths,
+            values=tuple(value * scale for value in measured.values),
+            provenance=SPECTRUM_RECONSTRUCTED,
+            derived_across=(min(level, at_level), max(level, at_level)),
+        )
 
     def _pair(self, patch: str) -> InstrumentReading:
         """Read the anchor with both instruments; derive once all are in.
