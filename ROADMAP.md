@@ -72,16 +72,3 @@ step until `§road:ocio-reads-csmf` lands there; the same file is what
 
 Return `colour-specio` to its released PyPI pin once the CSMF loader
 fix merges upstream, in `pyproject.toml`. §spec:scope.
-
-### Report-grade protocol tier §road:report-grade-protocol
-
-Add the named protocol tier carrying the colour cube, random samples
-and black/white repeats a distribution needs, in
-`display_measure/protocol.py` and MEASUREMENT.md. §spec:patch-protocol.
-
-**Verify:** a file written by `display-measure characterize` names the
-protocol and transfer function it was measured under; its
-reconstructed rows are named so an analysis needing a measured
-spectrum can exclude them; its digest verifies after a re-serialization
-that preserves content; and `display-report analyze` reads it with no
-conversion step.
