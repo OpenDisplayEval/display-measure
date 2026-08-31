@@ -1,3 +1,12 @@
+# [1.3.0](https://github.com/OpenDisplayEval/display-measure/compare/v1.2.0...v1.3.0) (2026-08-31)
+
+
+### Features
+
+* **artifact:** keep the spectrum behind each reading, with its provenance ([ccb6537](https://github.com/OpenDisplayEval/display-measure/commit/ccb65375544cf29075529545ec722babe1972674))
+* **artifact:** write the seam file as CSMF with a provenance block ([6a7e40f](https://github.com/OpenDisplayEval/display-measure/commit/6a7e40fd95918ba3f03f7eabc1373dae4f4f46c2))
+* **hybrid:** reconstruct a colorimeter-routed row's spectrum from its bright reading ([7d9e152](https://github.com/OpenDisplayEval/display-measure/commit/7d9e152c53c39eecea9b449957800cec95193354))
+
 # [1.2.0](https://github.com/OpenDisplayEval/display-measure/compare/v1.1.0...v1.2.0) (2026-08-30)
 
 
