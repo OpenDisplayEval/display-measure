@@ -33,7 +33,7 @@ from display_measure.hybrid import DerivationRefused, HybridInstrument
 from display_measure.instrument import XYZReading
 from display_measure.plausible_display import PlausibleDisplay
 from display_measure.processor import ContractViolation
-from display_measure.protocol import PROTOCOL_NAME, protocol_patches
+from display_measure.protocol import VERIFY_SUITE
 from display_measure.session import (
     Clock,
     characterize,
@@ -62,8 +62,8 @@ def test_the_stream_opens_with_the_session_and_its_patch_count(
     started = display_stream[0]
     assert isinstance(started, SessionStarted)
     assert started.mode == SessionMode.CHARACTERIZE
-    assert started.protocol_name == PROTOCOL_NAME
-    assert started.patch_count == len(protocol_patches())
+    assert started.protocol_name == VERIFY_SUITE.legacy_name
+    assert started.patch_count == len(VERIFY_SUITE.patches)
 
 
 def test_the_stream_closes_exactly_once_with_the_outcome(
@@ -86,7 +86,7 @@ def test_every_patch_reports_its_completion_with_a_reading_and_a_duration(
         range(1, started.patch_count + 1)
     )
     assert {event.patch for event in completed} == {
-        patch.name for patch in protocol_patches()
+        patch.name for patch in VERIFY_SUITE.patches
     }
     for event in completed:
         assert len(event.xyz) == 3
@@ -106,7 +106,7 @@ def test_each_patch_walks_drive_then_settle_then_read(
         for event in display_stream
         if isinstance(event, PatchStarted | PatchSettling | PatchCompleted)
     ]
-    assert len(steps) == 3 * len(protocol_patches())
+    assert len(steps) == 3 * len(VERIFY_SUITE.patches)
     for drive, settle, read in zip(steps[::3], steps[1::3], steps[2::3], strict=True):
         assert isinstance(drive, PatchStarted)
         assert isinstance(settle, PatchSettling)
@@ -183,6 +183,10 @@ def test_a_refusal_names_the_gate_and_ends_the_session(
             tmp_path / "refused.csmf",
             clock=fixed_clock,
             settle_seconds=0.0,
+            suite=VERIFY_SUITE,
+            warmup_seconds=0.0,
+            conditioning_seconds=0.0,
+            read_attempts=1,
             declared=replace(DECLARED_CONTRACT, intensity="1800 nits"),
             emit=stream.append,
         )
@@ -334,7 +338,7 @@ def test_an_unfit_correction_refuses_under_its_own_gate(
     out = tmp_path / "unfit.csmf"
     stream: list[SessionEvent] = []
     with MockBMDDeckLink(0) as device, pytest.raises(DerivationRefused):
-        device._max_frame_history = len(protocol_patches())
+        device._max_frame_history = len(VERIFY_SUITE.patches)
         display = PlausibleDisplay(device)
         characterize(
             device=device,
@@ -342,6 +346,10 @@ def test_an_unfit_correction_refuses_under_its_own_gate(
             out_path=out,
             clock=fixed_clock,
             settle_seconds=0.0,
+            suite=VERIFY_SUITE,
+            warmup_seconds=0.0,
+            conditioning_seconds=0.0,
+            read_attempts=1,
             reading=normalized_reading(),
             emit=stream.append,
         )

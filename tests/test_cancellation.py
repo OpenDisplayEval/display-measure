@@ -15,7 +15,7 @@ from display_measure.events import (
     SessionEvent,
 )
 from display_measure.plausible_display import PlausibleDisplay
-from display_measure.protocol import protocol_patches
+from display_measure.protocol import VERIFY_SUITE
 from display_measure.session import (
     Clock,
     characterize,
@@ -54,6 +54,10 @@ def run_cancelled(out: Path, clock: Clock, after: int) -> CancelAfter:
             out,
             clock=clock,
             settle_seconds=0.0,
+            suite=VERIFY_SUITE,
+            warmup_seconds=0.0,
+            conditioning_seconds=0.0,
+            read_attempts=1,
             emit=cancel.emit,
             cancelled=cancel,
         )
@@ -91,7 +95,7 @@ def test_the_stream_ends_cancelled(fixed_clock: Clock, tmp_path: Path) -> None:
     assert len(ended) == 1
     assert ended[0] is cancel.stream[-1]
     assert ended[0].outcome == Outcome.CANCELLED
-    assert "2 of 72" in ended[0].detail
+    assert f"2 of {len(VERIFY_SUITE.patches)}" in ended[0].detail
 
 
 def test_cancelling_before_the_first_patch_drives_nothing(
@@ -109,13 +113,17 @@ def test_cancellation_stops_playback(fixed_clock: Clock, tmp_path: Path) -> None
     device = MockBMDDeckLink(0)
     cancel = CancelAfter(2)
     with device, pytest.raises(SessionCancelled):
-        device._max_frame_history = len(protocol_patches())
+        device._max_frame_history = len(VERIFY_SUITE.patches)
         characterize(
             device=device,
             instrument=PlausibleDisplay(device),
             out_path=tmp_path / "cancelled.csmf",
             clock=fixed_clock,
             settle_seconds=0.0,
+            suite=VERIFY_SUITE,
+            warmup_seconds=0.0,
+            conditioning_seconds=0.0,
+            read_attempts=1,
             reading=normalized_reading(),
             emit=cancel.emit,
             cancelled=cancel,

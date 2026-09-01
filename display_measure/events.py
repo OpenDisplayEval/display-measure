@@ -232,6 +232,38 @@ class SessionEnded(SessionEvent):
     detail: str = ""
 
 
+@dataclass(frozen=True)
+class ProbeStarted(SessionEvent):
+    """A probe begins. `max_patches` is a bound, not a count.
+
+    Every other stage of a session announces what it will drive; a probe
+    cannot, because what it drives is decided from what it reads. Saying
+    so explicitly is better than a progress bar that lies
+    (§spec:session-events).
+    """
+
+    probe_id: str
+    max_patches: int
+
+
+@dataclass(frozen=True)
+class ProbeCompleted(SessionEvent):
+    """A probe ends, with what it found and what it cost to find it."""
+
+    probe_id: str
+    patches_driven: int
+    findings: dict[str, float | None]
+
+
+class UnreadablePatch(RuntimeError):
+    """Every attempt at one patch failed, so the artifact cannot be whole.
+
+    The artifact is all-or-nothing (§spec:artifact-chain): a session
+    with a hole in it is not a shorter session, it is one whose ramps
+    have a missing rung nothing downstream can see.
+    """
+
+
 class SessionCancelled(Exception):
     """Raised when a session stops on the caller's cancellation request.
 

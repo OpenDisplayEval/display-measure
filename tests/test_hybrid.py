@@ -35,7 +35,7 @@ from display_measure.plausible_display import (
     MismatchedColorimeter,
     PlausibleDisplay,
 )
-from display_measure.protocol import protocol_patches
+from display_measure.protocol import VERIFY_SUITE
 
 # Above every patch the display can emit: forces the colorimeter branch.
 ALL_COLORIMETER = 10 * PEAK_LUMINANCE
@@ -44,13 +44,13 @@ ALL_SPECTRO = 0.0
 
 # The protocol owns the code values; a local copy would drift from the
 # ladder silently.
-PATCH_RGB = {patch.name: patch.rgb for patch in protocol_patches()}
+PATCH_RGB = {patch.name: patch.rgb for patch in VERIFY_SUITE.patches}
 
 
 def rig(
     device: MockBMDDeckLink, threshold: float
 ) -> tuple[HybridInstrument, PlausibleDisplay]:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     hybrid = HybridInstrument(
         display, MismatchedColorimeter(display), luminance_threshold=threshold
     )
@@ -160,7 +160,7 @@ def test_routing_refuses_before_the_correction_is_derived(
 
 
 def test_the_threshold_must_be_a_finite_luminance(device: MockBMDDeckLink) -> None:
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     with pytest.raises(ValueError, match="threshold"):
         HybridInstrument(
             display, MismatchedColorimeter(display), luminance_threshold=float("inf")
@@ -196,7 +196,7 @@ def test_an_over_range_colorimeter_routes_to_the_spectroradiometer(
     """The bench case: the display outruns the colorimeter's ceiling on the
     bright patches, and the session completes on the reference
     instrument rather than dying at the first one."""
-    display = PlausibleDisplay(device)
+    display = PlausibleDisplay(device, read_noise=0.0)
     # Below full-drive white, above the derivation rungs — exactly the
     # bind a 1900 cd/m² display puts a CR-120 in.
     hybrid = HybridInstrument(
@@ -311,7 +311,7 @@ class TestReconstruction:
         """A session at the shipped threshold: white lands on the
         spectroradiometer, the dark rungs on the colorimeter — which is
         the split a reconstruction exists to bridge."""
-        display = PlausibleDisplay(device)
+        display = PlausibleDisplay(device, read_noise=0.0)
         hybrid = HybridInstrument(
             display,
             MismatchedColorimeter(display),
@@ -367,7 +367,7 @@ class TestReconstruction:
     ) -> None:
         """The row's XYZ is what the disciplined colorimeter measured;
         the reconstruction is a spectrum beside it, not a replacement."""
-        display = PlausibleDisplay(device)
+        display = PlausibleDisplay(device, read_noise=0.0)
         _, readings = self.readings(device)
         drive(device, PATCH_RGB["gray_0016"])
         routed = readings["gray_0016"].XYZ

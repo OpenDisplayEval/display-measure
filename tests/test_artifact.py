@@ -258,7 +258,7 @@ def test_schema_keeps_the_name_it_was_promoted_under() -> None:
     string deliberately did not follow. Every promoted artifact carries
     it and downstream loaders dispatch on it, so a mechanical
     find-replace across the repository would corrupt the provenance of
-    measurements already accepted. `PROTOCOL_NAME` is pinned the same
+    measurements already accepted. `VERIFY_SUITE.legacy_name` is pinned the same
     way in tests/test_protocol.py; this closes the asymmetry.
 
     Schema 2 added the wire encoding block; a schema-1 artifact implied

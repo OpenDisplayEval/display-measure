@@ -20,6 +20,7 @@ mismatch, giving the disciplined-colorimeter session two disagreeing
 instruments to reconcile without hardware.
 """
 
+import hashlib
 from typing import Protocol
 
 import numpy as np
@@ -45,6 +46,30 @@ BLUE_XY = (0.150, 0.060)
 WHITE_XY = (0.3127, 0.3290)
 PEAK_LUMINANCE = 1000.0
 BLACK_LEVEL = 0.005
+
+# Per-drive variation, cd/m², one standard deviation. Drive noise and
+# instrument repeatability together, because the quantity the report's
+# filter measures is their sum and no analysis can separate them. Its purpose is that the
+# double produce a *measurable* noise floor: the fidelity report keeps a
+# patch when its luminance above black clears the spread of the repeated
+# black readings, so an exact double has no spread, the filter cannot be
+# computed from its artifacts at all, and nothing without hardware can
+# check that a report is built from the patches it should be.
+#
+# Sized against this model's own ramps rather than copied from the
+# bench. The tightest adjacent rise the protocol asks of it is blue,
+# codes 16 to 24, at 2.2e-4 cd/m²; noise that approaches it inverts the
+# ramp and the session's own self-consistency gate refuses the artifact,
+# correctly. An order of magnitude below that leaves the floor
+# measurable and the ramps monotone. The bench CR-300 repeats a
+# blocked-aperture reading to sd 6e-4 — far coarser, because its floor
+# sits well above this display's black, which is the gap the
+# disciplined-colorimeter path exists to close.
+#
+# Deterministic all the same: the perturbation is derived from the read
+# index, not an RNG, so one run of the doubles is byte-identical to the
+# next (§spec:artifact-chain).
+READ_NOISE = 1e-5
 
 
 def _contract_gamma() -> float:
@@ -172,6 +197,7 @@ class PlausibleDisplay:
         *,
         encoding: WireEncoding = RGB12,
         ambient: float = 0.0,
+        read_noise: float = READ_NOISE,
     ) -> None:
         """`encoding` is the link the display decodes — the one the
         session declares, since the wire-format gate holds the processor
@@ -181,6 +207,59 @@ class PlausibleDisplay:
         self._device = device
         self._encoding = encoding
         self._ambient_xyz = _unit_xyz(WHITE_XY) * ambient
+        self._read_noise = read_noise
+        self._last_spot: bytes | None = None
+        self._drives: dict[bytes, int] = {}
+        self._offset = np.zeros(3)
+
+    def _drive_offset(
+        self, decoded: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.float64]:
+        """This drive event's variation, from the frame rather than an RNG.
+
+        Keyed to *what was driven and how many times it has been driven*,
+        not to a read counter. Two consequences, both load-bearing:
+
+        A drive event has one emission. Both instruments of a hybrid
+        session read the same frame at the same moment, so they see the
+        same offset — the colorimeter's disagreement with the
+        spectroradiometer stays the filter mismatch the session exists
+        to correct, rather than the mismatch plus two independent draws.
+
+        And a session's readings do not depend on how many instruments
+        took them. A read counter made a hybrid session's noise diverge
+        from a spectroradiometer-only one measuring the same patches,
+        which broke the guarantee that disciplining the colorimeter
+        reproduces the session without it.
+
+        Keyed on what the display *decoded*, not on the bytes the link
+        carried: the panel emits by drive level, so one patch over two
+        wire encodings is one emission wherever the link can represent
+        it. Keying the raw frame instead made full-drive white differ
+        between an rgb12 and a v210 session, which the artifacts then
+        reported as two different peak luminances.
+
+        Neutral in chromaticity: at these levels the variation is
+        dominated by drive and integration, which move all three
+        channels together, and a double that walked the chromaticity of
+        black would be modelling something it has no basis for.
+        """
+        if self._read_noise <= 0:
+            return np.zeros(3)
+        # Rounded, so float representation cannot split one drive level
+        # into two; nine places is far below any drive the model resolves.
+        key = repr(tuple(round(float(v), 9) for v in decoded)).encode()
+        if key != self._last_spot:
+            # A new drive event of this frame content, so a new emission.
+            # Two identical patches driven back to back would share one,
+            # which is what physically happens: nothing changed.
+            self._last_spot = key
+            self._drives[key] = self._drives.get(key, 0) + 1
+            digest = hashlib.sha256(key + f":{self._drives[key]}".encode()).digest()
+            # Uniform on [-1, 1), scaled so the population sd is the noise.
+            unit = int.from_bytes(digest[:8], "big") / 2**63 - 1.0
+            self._offset = _unit_xyz(WHITE_XY) * (unit * self._read_noise * 3**0.5)
+        return self._offset
 
     def measure(self) -> XYZReading:
         frame = self._device.get_last_frame()
@@ -190,8 +269,10 @@ class PlausibleDisplay:
             )
         # A spot instrument aimed at the display center.
         spot = frame[frame.shape[0] // 2, frame.shape[1] // 2]
-        linear = decode_pixel(self._encoding, spot) ** DECODE_GAMMA
+        decoded = decode_pixel(self._encoding, spot)
+        linear = decoded**DECODE_GAMMA
         xyz = self._ambient_xyz + _BLACK_XYZ + _PRIMARY_XYZ @ linear
+        xyz = xyz + self._drive_offset(decoded)
         # A spectroradiometer's reading: the spectrum is measured, and
         # it integrates back to the XYZ beside it.
         return XYZReading(XYZ=xyz, spectrum=emitter_spectrum(xyz))

@@ -16,7 +16,7 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -29,6 +29,18 @@ import typer
 # the lifecycle contract costs `--help` nothing (§spec:session-events).
 from display_measure.events import Cancelled, SessionCancelled
 
+# The patch vocabulary, not the measurement stack: `display_measure.protocol`
+# pulls in hashlib and dataclasses and nothing heavier, so `--help` pays
+# 0.02 s for it. What stays deferred below is numpy, specio and the
+# DeckLink bindings.
+from display_measure.protocol import (
+    BLOCKS,
+    SUITES,
+    MeasurementSuite,
+    PatchBlock,
+    compose,
+)
+
 app = typer.Typer(
     name="display-measure",
     help="display-measure: gated instrument sessions for display characterization.",
@@ -36,6 +48,21 @@ app = typer.Typer(
 )
 
 DEFAULT_SETTLE_SECONDS = 0.5
+
+
+class SuiteChoice(StrEnum):
+    """A preset composition of measurement blocks.
+
+    Named for what the session is *for*: an operator knows what they
+    need the numbers for, not which blocks that takes. `--blocks`
+    composes explicitly where no preset fits.
+    """
+
+    CONFIG = "config"
+    VERIFY = "verify"
+    REPORT = "report"
+
+
 # 128 + SIGINT, the shell convention for a process the operator
 # interrupted. Distinct from the refusal code, because a cancelled
 # session found nothing wrong with the rig.
@@ -126,6 +153,62 @@ def _parse_timestamp(value: str) -> datetime:
     return parsed
 
 
+def _confirm_panel_state(panel_state: tuple[tuple[str, str], ...]) -> None:
+    """Ask the operator to read the panel back.
+
+    None of this is readable from the processor, and all of it moves the
+    measurement. A manifest field alone goes stale the moment someone
+    changes it at the rig, so the one instrument that can read it is
+    asked directly.
+    """
+    typer.echo(
+        "The manifest attests this panel state, which cannot be read "
+        "from the processor — confirm it at the panel OSD:",
+        err=True,
+    )
+    for key, value in panel_state:
+        typer.echo(f"  {key}: {value}", err=True)
+    if not typer.confirm("Does the panel read exactly this?"):
+        typer.echo(
+            "Refused: panel state unconfirmed. Update the manifest to "
+            "what the panel actually reads, or set the panel to match.",
+            err=True,
+        )
+        raise typer.Exit(2)
+
+
+def _print_blocks(blocks: dict[str, PatchBlock]) -> None:
+    """The blocks and what each measures. `--list-blocks`."""
+    for block in blocks.values():
+        typer.echo(f"{block.id}  ({len(block.patches)} patches)")
+        typer.echo(f"    {block.measures}\n")
+
+
+def _resolve_suite(
+    suite_name: str,
+    blocks: str | None,
+    suites: dict[str, MeasurementSuite],
+    compose: Callable[..., MeasurementSuite],
+) -> MeasurementSuite:
+    """The composition to drive: explicit blocks, else the named preset.
+
+    A typo in `--blocks` drives a session measuring the wrong thing and
+    says nothing about it, so an unknown name exits rather than falling
+    back to a preset.
+    """
+    if blocks is None:
+        return suites[suite_name]
+    names = [name.strip() for name in blocks.split(",") if name.strip()]
+    if not names:
+        typer.echo("Error: --blocks was given no block names", err=True)
+        raise typer.Exit(2)
+    try:
+        return compose(*names)
+    except KeyError as e:
+        typer.echo(f"Error: {e.args[0]}", err=True)
+        raise typer.Exit(2) from e
+
+
 @app.command()
 def characterize(
     out: Path = typer.Option(
@@ -159,6 +242,69 @@ def characterize(
         DEFAULT_SETTLE_SECONDS,
         "--settle",
         help="Settle delay after each patch, seconds.",
+    ),
+    suite: SuiteChoice = typer.Option(
+        SuiteChoice.VERIFY,
+        "--suite",
+        help=(
+            "Preset composition of measurement blocks. 'config' drives "
+            "only what an OCIO config reads (5 patches). 'verify' adds the "
+            "blocks that test the model a config assumes — response and "
+            "additivity — which is what protocol 3 drove (72 patches, ~10 "
+            "min). 'report' adds everything the fidelity report's analysis "
+            "reads (795 patches, ~110 min). Ignored when --blocks is given."
+        ),
+    ),
+    blocks: str | None = typer.Option(
+        None,
+        "--blocks",
+        help=(
+            "Comma-separated measurement blocks to drive, composed "
+            "explicitly instead of by preset — 'anchors,response' or "
+            "'anchors,noise-floor'. Each block versions on its own and "
+            "the artifact records which it carries, so a consumer requires "
+            "blocks rather than a bundle version. Conditions come from the "
+            "strictest block composed. Run --list-blocks to see them."
+        ),
+    ),
+    list_blocks: bool = typer.Option(
+        False,
+        "--list-blocks",
+        help="Print the measurement blocks, what reads each, and exit.",
+    ),
+    warmup: float | None = typer.Option(
+        None,
+        "--warmup",
+        min=0.0,
+        help=(
+            "Random colour driven before the first reading, seconds. An "
+            "LED panel's output drifts for minutes after it starts "
+            "driving, and the session opens on its most delicate patch. "
+            "Defaults to what the chosen protocol specifies."
+        ),
+    ),
+    conditioning: float | None = typer.Option(
+        None,
+        "--conditioning",
+        min=0.0,
+        help=(
+            "Random colour driven between patches, seconds. Holds the "
+            "panel at video-like load, so a reading is not taken from a "
+            "thermal state a run of solid patches produces and a moving "
+            "picture never does. Recorded as a session condition; "
+            "defaults to what the chosen protocol specifies."
+        ),
+    ),
+    read_attempts: int | None = typer.Option(
+        None,
+        "--read-attempts",
+        min=1,
+        help=(
+            "Attempts at each patch before the session fails. The "
+            "instrument's failures at the bottom of a panel are "
+            "transient; a session of hundreds of patches should not be "
+            "lost to one of them. Defaults to the chosen protocol's."
+        ),
     ),
     wire: WireChoice = typer.Option(
         WireChoice.RGB12,
@@ -241,24 +387,13 @@ def characterize(
         DECLARED_CONTRACT if manifest is None else contract_from_manifest(manifest)
     )
     if not doubled and declared.panel_state and not assume_attested:
-        # None of this is readable from the processor, and all of it moves
-        # the measurement. A manifest field alone goes stale the moment
-        # someone changes it at the rig, so the one instrument that can
-        # read it is asked directly.
-        typer.echo(
-            "The manifest attests this panel state, which cannot be read "
-            "from the processor — confirm it at the panel OSD:",
-            err=True,
-        )
-        for key, value in declared.panel_state:
-            typer.echo(f"  {key}: {value}", err=True)
-        if not typer.confirm("Does the panel read exactly this?"):
-            typer.echo(
-                "Refused: panel state unconfirmed. Update the manifest to "
-                "what the panel actually reads, or set the panel to match.",
-                err=True,
-            )
-            raise typer.Exit(2)
+        _confirm_panel_state(declared.panel_state)
+
+    if list_blocks:
+        _print_blocks(BLOCKS)
+        raise typer.Exit(0)
+
+    chosen = _resolve_suite(suite.value, blocks, SUITES, compose)
 
     try:
         with _cancel_on_interrupt() as cancelled:
@@ -267,6 +402,7 @@ def characterize(
                     out,
                     clock=clock,
                     settle_seconds=settle,
+                    suite=chosen,
                     hybrid=hybrid,
                     luminance_threshold=threshold,
                     encoding=encoding,
@@ -277,6 +413,10 @@ def characterize(
                     out,
                     clock=clock,
                     settle_seconds=settle,
+                    suite=chosen,
+                    warmup_seconds=warmup,
+                    conditioning_seconds=conditioning,
+                    read_attempts=read_attempts,
                     hybrid=hybrid,
                     luminance_threshold=threshold,
                     processor_host=processor,

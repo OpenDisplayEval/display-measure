@@ -17,9 +17,8 @@ from display_measure.hybrid import DERIVATION_PATCHES
 from display_measure.processor import ContractViolation, InputMetadata
 from display_measure.protocol import (
     FULL_DRIVE,
-    PROTOCOL_NAME,
+    VERIFY_SUITE,
     presentation_order,
-    protocol_patches,
 )
 from display_measure.session import Clock, doubles_session, hardware_session
 from display_measure.wire import V210, encode_pixel
@@ -93,7 +92,7 @@ def test_session_drives_the_full_protocol_in_presentation_order(
 ) -> None:
     frames = display_device.get_frame_history()
     # The default doubles wiring shuffles with seed 0.
-    expected = presentation_order(protocol_patches(), seed=0)
+    expected = presentation_order(VERIFY_SUITE.patches, seed=0)
     assert len(frames) == len(expected)
     assert frames[0].max() == 0  # black opens the session
     for frame, patch in zip(frames, expected, strict=True):
@@ -104,8 +103,8 @@ def test_artifact_records_the_protocol_and_unshuffle_key(
     display_artifact: Path,
 ) -> None:
     doc = projection(display_artifact)
-    assert doc["protocol"]["name"] == PROTOCOL_NAME
-    driven = [p.name for p in presentation_order(protocol_patches(), seed=0)]
+    assert doc["protocol"]["name"] == VERIFY_SUITE.legacy_name
+    driven = [p.name for p in presentation_order(VERIFY_SUITE.patches, seed=0)]
     assert doc["protocol"]["presentation_order"] == driven
     for channel in ("red", "green", "blue"):
         ramp = doc["per_channel_response"][channel]
@@ -159,7 +158,7 @@ def test_hybrid_session_leads_with_the_derivation_rungs(
     doc = projection(hybrid_artifact)
     order = doc["protocol"]["presentation_order"]
     assert order[:4] == [*DERIVATION_PATCHES, "black"]
-    assert sorted(order) == sorted(p.name for p in protocol_patches())
+    assert sorted(order) == sorted(p.name for p in VERIFY_SUITE.patches)
 
 
 def test_hybrid_artifact_attributes_every_row_to_an_instrument(
@@ -352,7 +351,7 @@ def test_a_v210_session_drives_the_encoded_codes_through_the_yuv_format(
     formats = [call["format"] for call in method_calls(device, "set_pixel_format")]
     assert formats == [PixelFormatType.FORMAT_10BIT_YUV]
     frames = device.get_frame_history()
-    expected = presentation_order(protocol_patches(), seed=0)
+    expected = presentation_order(VERIFY_SUITE.patches, seed=0)
     assert len(frames) == len(expected)
     for frame, patch in zip(frames, expected, strict=True):
         assert tuple(frame[0, 0]) == encode_pixel(V210, patch.rgb), patch.name
@@ -376,7 +375,7 @@ def test_artifacts_over_different_links_are_legibly_different_measurements(
     v210 = projection(v210_run[0])
     rgb = projection(display_artifact)
     assert v210["wire_encoding"] != rgb["wire_encoding"]
-    driven = presentation_order(protocol_patches(), seed=0)
+    driven = presentation_order(VERIFY_SUITE.patches, seed=0)
     assert v210["wire_encoding"]["wire_codes"] == [
         list(encode_pixel(V210, patch.rgb)) for patch in driven
     ]

@@ -26,10 +26,11 @@ Determinism: see the determinism-seam design in
 `display_measure.artifact`'s module docstring.
 """
 
+import hashlib
 import logging
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -70,10 +71,13 @@ from display_measure.events import (
     PatchSettling,
     PatchStarted,
     PlaybackStarted,
+    ProbeCompleted,
+    ProbeStarted,
     SessionCancelled,
     SessionEnded,
     SessionMode,
     SessionStarted,
+    UnreadablePatch,
 )
 from display_measure.hybrid import (
     DEFAULT_LUMINANCE_THRESHOLD,
@@ -91,6 +95,7 @@ from display_measure.instrument import (
     xyz,
 )
 from display_measure.plausible_display import MismatchedColorimeter, PlausibleDisplay
+from display_measure.probes import ProbeResult
 from display_measure.processor import (
     ContractViolation,
     TesseraProcessor,
@@ -105,14 +110,24 @@ from display_measure.protocol import (
     BLACK_PATCH,
     FULL_DRIVE,
     OPENING_PINS,
-    PROTOCOL_NAME,
+    VERIFY_SUITE,
     WHITE_PATCH,
+    MeasurementSuite,
     Patch,
     presentation_order,
-    protocol_patches,
 )
 from display_measure.session_log import log_events
 from display_measure.wire import RGB12, encode_pixel
+
+# How many driven frames the doubles retain for a test to inspect. A
+# frame is 12.4 MB, so this is a memory budget, not a preference.
+MAX_RETAINED_FRAMES = 128
+
+# Conditions are a property of the protocol (`MeasurementSuite`),
+# not of the session: they are part of what makes two artifacts
+# comparable, and a caller that has to remember them is a caller that
+# will not. A session may still override one, which is what a bench
+# investigation needs and a comparable run does not do.
 
 __all__ = [
     "Clock",
@@ -296,13 +311,80 @@ def _settle(seconds: float, index: int, emit: EventSink) -> None:
     time.sleep(seconds)
 
 
-def _read(instrument: Instrument, patch: Patch) -> InstrumentReading:
+# Conditioning frames go out at roughly this rate, which is what
+# display-report's retired measure path drove. The interval is the
+# floor, not the achieved rate: driving a frame takes time of its own.
+CONDITIONING_INTERVAL = 3 / 24
+
+
+def _condition(
+    device: PatchDrive,
+    encoding: WireEncoding,
+    seconds: float,
+    *,
+    seed: int,
+    label: str,
+) -> None:
+    """Drive random colour for `seconds`, to hold the panel at video-like load.
+
+    An LED panel measured on a run of solid patches is not the panel an
+    operator drives: junction temperature settles somewhere a moving
+    picture never takes it, and the response measured there is the
+    response of a thermal state the display does not otherwise occupy.
+    The retired measure path ran this between every patch and for ten
+    minutes before the first, which is why its numbers are the ones the
+    report's analysis was calibrated against.
+
+    Colours come from the session seed, not an RNG: nothing records
+    them, but they reach the device, and the determinism seam holds
+    that two runs of one seed drive one sequence of frames
+    (§spec:artifact-chain).
+    """
+    if seconds <= 0:
+        return
+    deadline = time.monotonic() + seconds
+    frame = 0
+    while time.monotonic() < deadline:
+        digest = hashlib.sha256(f"{seed}:{label}:{frame}".encode()).digest()
+        rgb = tuple(
+            int.from_bytes(digest[word * 4 : word * 4 + 4], "big") % (FULL_DRIVE + 1)
+            for word in range(3)
+        )
+        device.display_frame(_frame(encoding, rgb))
+        frame += 1
+        # Never past the deadline: conditioning is a duration the
+        # session was given, and a frame interval is not a reason to
+        # spend more of it than that.
+        time.sleep(min(CONDITIONING_INTERVAL, max(0.0, deadline - time.monotonic())))
+
+
+def _read(
+    instrument: Instrument, patch: Patch, *, attempts: int = 1
+) -> InstrumentReading:
     # A disciplined instrument routes by patch, so it is read by name;
     # the patch is already in hand here, which keeps the instrument
     # from shadowing the session's own iteration (§spec:sessions).
-    if isinstance(instrument, DisciplinedInstrument):
-        return instrument.measure_patch(patch.name)
-    return instrument.measure()
+    #
+    # A read is retried because the failures this instrument produces at
+    # the bottom of a panel are transient: a timed-out integration or a
+    # truncated serial reply says the link stumbled, not that the patch
+    # is unreadable. The retired measure path allowed ten attempts, and
+    # a session of 799 patches cannot be thrown away by one of them.
+    # Gate refusals are not retried — a refusal is a verdict, and asking
+    # again does not change it.
+    last: Exception | None = None
+    for _ in range(max(attempts, 1)):
+        try:
+            if isinstance(instrument, DisciplinedInstrument):
+                return instrument.measure_patch(patch.name)
+            return instrument.measure()
+        except DerivationRefused:
+            raise
+        except Exception as failure:
+            last = failure
+    raise UnreadablePatch(
+        f"no reading for patch {patch.name!r} in {attempts} attempts"
+    ) from last
 
 
 def _log_instrument(instrument: Instrument, note: str = "") -> None:
@@ -347,10 +429,19 @@ def _ramp(
     anchors' absolute XYZ would otherwise leave the session only as
     derived chromaticities, starving additivity and gain analysis.
     """
-    points = tuple(
-        ResponsePoint(code=max(patch.rgb), xyz=xyz(readings[patch.name]))
-        for patch in protocol
-        if patch.role == role
+    # Sorted by code, not taken in patch order. A ramp is assembled from
+    # whichever blocks the suite composed — `response` carries the
+    # half-octave ladder and `tracking` the even codes between its rungs
+    # — so patch order is block order, which interleaves nothing and
+    # ascends nowhere. The artifact promises protocol order, and the
+    # self-consistency gate reads these rows as a ramp.
+    points = sorted(
+        (
+            ResponsePoint(code=max(patch.rgb), xyz=xyz(readings[patch.name]))
+            for patch in protocol
+            if patch.role == role
+        ),
+        key=lambda point: point.code,
     )
     return (*points, ResponsePoint(code=FULL_DRIVE, xyz=xyz(readings[anchor])))
 
@@ -362,6 +453,10 @@ def characterize(
     *,
     clock: Clock,
     settle_seconds: float,
+    suite: MeasurementSuite,
+    warmup_seconds: float | None = None,
+    conditioning_seconds: float | None = None,
+    read_attempts: int | None = None,
     seed: int = 0,
     encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
@@ -397,11 +492,22 @@ def characterize(
     emit(
         SessionStarted(
             mode=SessionMode.CHARACTERIZE,
-            protocol_name=PROTOCOL_NAME,
-            patch_count=len(protocol_patches()),
+            protocol_name=suite.legacy_name or suite.name,
+            patch_count=len(suite.patches),
             at=session_start,
         )
     )
+    # The protocol carries the conditions it is measured under; an
+    # explicit argument overrides one, which is what a bench
+    # investigation needs and a comparable session does not do.
+    warmup_seconds = suite.warmup_seconds if warmup_seconds is None else warmup_seconds
+    conditioning_seconds = (
+        suite.conditioning_seconds
+        if conditioning_seconds is None
+        else conditioning_seconds
+    )
+    read_attempts = suite.read_attempts if read_attempts is None else read_attempts
+
     with _session_outcome(emit, clock):
         _characterize(
             device,
@@ -409,6 +515,10 @@ def characterize(
             out_path,
             clock=clock,
             settle_seconds=settle_seconds,
+            suite=suite,
+            warmup_seconds=warmup_seconds,
+            conditioning_seconds=conditioning_seconds,
+            read_attempts=read_attempts,
             seed=seed,
             encoding=encoding,
             declared=declared,
@@ -426,6 +536,10 @@ def _characterize(
     *,
     clock: Clock,
     settle_seconds: float,
+    suite: MeasurementSuite,
+    warmup_seconds: float,
+    conditioning_seconds: float,
+    read_attempts: int,
     seed: int,
     encoding: WireEncoding,
     declared: ProcessorStateSnapshot,
@@ -462,6 +576,14 @@ def _characterize(
 
     _setup_drive(device, encoding, emit)
 
+    # Warmup precedes everything measured. An LED panel's output drifts
+    # for minutes after it starts driving, and a session that opens on
+    # its most delicate reading — black — reads that drift as the
+    # display's black level. Ten minutes is what the retired measure
+    # path allowed, and the report's analysis was calibrated on panels
+    # that had it.
+    _condition(device, encoding, warmup_seconds, seed=seed, label="warmup")
+
     # The session opens on black — presentation_order pins it first;
     # the ambient gate consumes that opening reading and black_level
     # records the same measurement. §road:session-gates adds the
@@ -480,7 +602,7 @@ def _characterize(
     pinned = OPENING_PINS
     if disciplined is not None:
         pinned = (*disciplined.derivation_patches(), *OPENING_PINS)
-    presented = presentation_order(protocol_patches(), seed, pinned=pinned)
+    presented = presentation_order(suite.patches, seed, pinned=pinned)
     try:
         readings, patch_seconds, ambient_floor = _drive_presentation(
             device,
@@ -489,6 +611,9 @@ def _characterize(
             presented,
             clock=clock,
             settle_seconds=settle_seconds,
+            conditioning_seconds=conditioning_seconds,
+            read_attempts=read_attempts,
+            seed=seed,
             declared_intensity=declared.intensity,
             emit=emit,
             cancelled=cancelled,
@@ -501,8 +626,22 @@ def _characterize(
         # (§spec:session-events).
         device.stop_playback()
 
+    # Probes run here: after every shuffled patch, because each of a
+    # probe's own patches depends on the reading before it, and because
+    # it searches against the black the anchors just measured.
+    probe_results = _run_probes(
+        suite,
+        device,
+        encoding,
+        instrument,
+        ambient_floor,
+        read_attempts=read_attempts,
+        settle_seconds=settle_seconds,
+        emit=emit,
+    )
+
     session_end = clock()
-    protocol = protocol_patches()
+    patches = suite.patches
     artifact = MeasurementsArtifact(
         red_xy=chromaticity(readings["red"]),
         green_xy=chromaticity(readings["green"]),
@@ -526,19 +665,33 @@ def _characterize(
         # The seam file's own rows: what was driven, and what was read.
         driven_codes=tuple(patch.rgb for patch in presented),
         readings=tuple(xyz(readings[patch.name]) for patch in presented),
-        protocol_name=PROTOCOL_NAME,
+        protocol_name=suite.legacy_name or suite.name,
+        protocol_blocks=suite.block_ids,
+        probe_results=probe_results,
         presentation_order=tuple(patch.name for patch in presented),
+        # An artifact carries what its suite measured and no more. A
+        # session composing only `anchors` has no ramps and no
+        # secondaries, and inventing empty ones would report an
+        # unmeasured thing as a measured one (§spec:patch-protocol).
         per_channel_response=PerChannelResponse(
-            red=_ramp(protocol, readings, "red_response", anchor="red"),
-            green=_ramp(protocol, readings, "green_response", anchor="green"),
-            blue=_ramp(protocol, readings, "blue_response", anchor="blue"),
+            red=_ramp(patches, readings, "red_response", anchor="red"),
+            green=_ramp(patches, readings, "green_response", anchor="green"),
+            blue=_ramp(patches, readings, "blue_response", anchor="blue"),
+        )
+        if _measured(patches, "red_response")
+        else None,
+        gray_response=(
+            _ramp(patches, readings, "gray_response", anchor="white")
+            if _measured(patches, "gray_response")
+            else None
         ),
-        gray_response=_ramp(protocol, readings, "gray_response", anchor="white"),
         additivity=AdditivityTriad(
             yellow_xyz=xyz(readings["yellow"]),
             cyan_xyz=xyz(readings["cyan"]),
             magenta_xyz=xyz(readings["magenta"]),
-        ),
+        )
+        if _measured(patches, "additivity_yellow")
+        else None,
         instrument_routing=None if disciplined is None else disciplined.routing(),
         patch_seconds=patch_seconds,
     )
@@ -549,6 +702,62 @@ def _characterize(
     # someone who was not in the room (§road:session-consistency).
     _audit_self_consistency(artifact, emit)
     _handoff(artifact, out_path, emit)
+
+
+def _run_probes(
+    suite: MeasurementSuite,
+    device: PatchDrive,
+    encoding: WireEncoding,
+    instrument: Instrument,
+    floor: float | None,
+    *,
+    read_attempts: int,
+    settle_seconds: float,
+    emit: EventSink,
+) -> tuple[ProbeResult, ...]:
+    """Run the suite's probes, each against the floor the session measured.
+
+    A probe is handed a `read` that drives a code and returns its
+    luminance; everything else — settle, instrument, retry — stays the
+    session's, so a probe holds nothing but its search.
+    """
+    if not suite.probes:
+        return ()
+    if floor is None:
+        # The floor comes from the black the anchors measured. A suite
+        # composing a probe without `anchors` never read one, and a
+        # probe comparing against nothing would call the black reading
+        # itself the first light.
+        raise ValueError(
+            f"{suite.name} composes probes but measured no black to search "
+            "against; compose the `anchors` block ahead of them"
+        )
+
+    def read(rgb: tuple[int, int, int]) -> float:
+        device.display_frame(_frame(encoding, rgb))
+        time.sleep(settle_seconds)
+        probe_patch = Patch(f"probe_{rgb[0]}_{rgb[1]}_{rgb[2]}", rgb, role="probe")
+        return luminance(_read(instrument, probe_patch, attempts=read_attempts))
+
+    # A probe's patches are not artifact rows, and an instrument that
+    # files a source per row would file one for each of them — leaving
+    # the routing record longer than the rows it parallels, which the
+    # artifact refuses. Routing still applies to the reads themselves.
+    off_record = getattr(instrument, "off_the_record", None)
+
+    results = []
+    for probe in suite.probes:
+        emit(ProbeStarted(probe.id, probe.max_patches))
+        with off_record() if off_record else nullcontext():
+            result = probe.with_floor(floor).run(read)
+        emit(ProbeCompleted(probe.id, result.patch_count, dict(result.findings)))
+        results.append(result)
+    return tuple(results)
+
+
+def _measured(patches: tuple[Patch, ...], role: str) -> bool:
+    """Whether the driven suite carried any patch filling `role`."""
+    return any(patch.role == role for patch in patches)
 
 
 def _audit_self_consistency(artifact: MeasurementsArtifact, emit: EventSink) -> None:
@@ -617,6 +826,9 @@ def _drive_presentation(
     *,
     clock: Clock,
     settle_seconds: float,
+    conditioning_seconds: float,
+    read_attempts: int,
+    seed: int,
     declared_intensity: str,
     emit: EventSink,
     cancelled: Cancelled,
@@ -642,6 +854,16 @@ def _drive_presentation(
                 "no artifact written"
             )
         began = clock()
+        # Conditioning precedes the patch, so the panel arrives at every
+        # reading from video-like load rather than from the previous
+        # solid patch (§spec:patch-protocol).
+        _condition(
+            device,
+            encoding,
+            conditioning_seconds,
+            seed=seed,
+            label=f"patch:{index}",
+        )
         _drive(device, encoding, patch, index, emit)
         _settle(settle_seconds, index, emit)
         # A disciplined instrument derives its correction from the
@@ -650,7 +872,7 @@ def _drive_presentation(
         # inside the instrument, so the read is where the session can
         # name it.
         with _gate(emit, Gate.DERIVATION_FITNESS, (DerivationRefused,)):
-            measurement = _read(instrument, patch)
+            measurement = _read(instrument, patch, attempts=read_attempts)
         seconds = (clock() - began).total_seconds()
         readings[patch.name] = measurement
         patch_seconds.append(seconds)
@@ -710,6 +932,15 @@ def doubles_session(
     *,
     clock: Clock,
     settle_seconds: float,
+    suite: MeasurementSuite = VERIFY_SUITE,
+    # The doubles have no junction temperature to hold anywhere, and no
+    # serial link to stumble on. Conditioning a mock would buy nothing
+    # and cost the report protocol's 795 patches five seconds each, so
+    # the doubles override the protocol's conditions rather than
+    # inheriting them.
+    warmup_seconds: float = 0.0,
+    conditioning_seconds: float = 0.0,
+    read_attempts: int = 1,
     seed: int | None = None,
     hybrid: bool = False,
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
@@ -736,7 +967,15 @@ def doubles_session(
         # full-protocol drive. Widening it here keeps the observability
         # this function promises; an upstream gap worth closing
         # (MockBMDDeckLink hardcodes _max_frame_history).
-        device._max_frame_history = len(protocol_patches())
+        #
+        # Bounded, because a retained frame is a real one: 1080p at
+        # 12-bit RGB is 12.4 MB, so one per patch is 0.9 GB across the
+        # verify suite and 9.9 GB across the report suite — more than a
+        # CI runner has, and the reason the test job was killed rather
+        # than failed. The bound holds every frame of a suite small
+        # enough to assert frame by frame, and the newest of a larger
+        # one.
+        device._max_frame_history = min(len(suite.patches), MAX_RETAINED_FRAMES)
         instrument: Instrument
         if hybrid:
             display = PlausibleDisplay(device, encoding=encoding)
@@ -760,6 +999,10 @@ def doubles_session(
             out_path=out_path,
             clock=clock,
             settle_seconds=settle_seconds,
+            suite=suite,
+            warmup_seconds=warmup_seconds,
+            conditioning_seconds=conditioning_seconds,
+            read_attempts=read_attempts,
             seed=seed if seed is not None else 0,
             encoding=encoding,
             declared=declared,
@@ -795,6 +1038,10 @@ def hardware_session(
     *,
     clock: Clock,
     settle_seconds: float,
+    suite: MeasurementSuite = VERIFY_SUITE,
+    warmup_seconds: float | None = None,
+    conditioning_seconds: float | None = None,
+    read_attempts: int | None = None,
     hybrid: bool = False,
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
     processor_host: str | None = None,
@@ -842,6 +1089,10 @@ def hardware_session(
             out_path=out_path,
             clock=clock,
             settle_seconds=settle_seconds,
+            suite=suite,
+            warmup_seconds=warmup_seconds,
+            conditioning_seconds=conditioning_seconds,
+            read_attempts=read_attempts,
             encoding=encoding,
             declared=declared,
             reading=reading,
