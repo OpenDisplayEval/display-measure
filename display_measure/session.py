@@ -452,10 +452,34 @@ def _read(
         except DerivationRefused:
             raise
         except Exception as failure:
+            # An instrument that measured and found the light outside
+            # what it can report has answered the question. Asking again
+            # spends the integration to be told the same true thing —
+            # ten times sixty-five seconds, on a CR-300 at slow speed,
+            # is eleven minutes to learn nothing (§spec:sessions).
+            if _is_out_of_range(failure):
+                raise
             last = failure
     raise UnreadablePatch(
         f"no reading for patch {patch.name!r} in {attempts} attempts"
     ) from last
+
+
+# What a driver calls the condition "I measured, and the light is
+# outside what I can report". Matched by name rather than imported: the
+# session reads instruments through protocols and does not depend on any
+# one driver, and the doubles raise nothing of the sort.
+OUT_OF_RANGE_ERROR = "MeasurementOutOfRange"
+
+
+def _is_out_of_range(failure: BaseException) -> bool:
+    """Whether an instrument said the light is outside its range.
+
+    A result, not a failure to obtain one — the instrument integrated
+    and reported what it found. A session records it and moves on, or
+    routes the patch to something more sensitive.
+    """
+    return any(base.__name__ == OUT_OF_RANGE_ERROR for base in type(failure).__mro__)
 
 
 def _log_instrument(instrument: Instrument, note: str = "") -> None:

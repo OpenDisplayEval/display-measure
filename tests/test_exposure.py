@@ -9,6 +9,7 @@ looked at what came back.
 
 import pytest
 
+from display_measure.events import UnreadablePatch
 from display_measure.exposure import (
     DEFAULT_LADDER,
     MAX_READ_SECONDS,
@@ -193,3 +194,57 @@ def test_a_custom_ladder_is_honoured() -> None:
     one = ExposureRung(speed=None, average_samples=1, trustworthy_above=0.0)
 
     assert rung_for(0.0, (one,)) is one
+
+
+class TestAVerdictIsNotRetried:
+    """`LIGHT_INTENSITY_UNMEASURABLE` is the instrument answering, not
+    the exchange failing. The bench CR-300 returns it in about 65 s at
+    slow speed, so ten attempts is eleven minutes spent learning the
+    same true thing eleven times.
+    """
+
+    class OutOfRange(Exception):
+        pass
+
+    def test_an_out_of_range_reading_is_raised_at_once(self) -> None:
+        from display_measure.protocol import Patch
+        from display_measure.session import _read
+
+        class Refusing:
+            manufacturer = model = serial_number = "x"
+
+            def __init__(self) -> None:
+                self.reads = 0
+
+            def measure(self) -> XYZReading:
+                self.reads += 1
+                raise type("MeasurementOutOfRange", (Exception,), {})(
+                    "Light intensity too low or unmeasurable"
+                )
+
+        instrument = Refusing()
+        with pytest.raises(Exception, match="unmeasurable"):
+            _read(instrument, Patch("black", (0, 0, 0), "black_level"), attempts=10)
+
+        assert instrument.reads == 1, "a verdict was retried"
+
+    def test_a_stumbling_link_is_still_retried(self) -> None:
+        """The distinction that matters: a truncated reply is transient."""
+        from display_measure.protocol import Patch
+        from display_measure.session import _read
+
+        class Stumbling:
+            manufacturer = model = serial_number = "x"
+
+            def __init__(self) -> None:
+                self.reads = 0
+
+            def measure(self) -> XYZReading:
+                self.reads += 1
+                raise TimeoutError("truncated serial reply")
+
+        instrument = Stumbling()
+        with pytest.raises(UnreadablePatch):
+            _read(instrument, Patch("black", (0, 0, 0), "black_level"), attempts=4)
+
+        assert instrument.reads == 4
