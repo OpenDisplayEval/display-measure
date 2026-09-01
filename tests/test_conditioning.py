@@ -18,7 +18,7 @@ from bmd_sg.decklink import MockBMDDeckLink
 from display_measure.events import UnreadablePatch
 from display_measure.instrument import XYZReading
 from display_measure.plausible_display import PlausibleDisplay
-from display_measure.protocol import REPORT_SUITE, Patch
+from display_measure.protocol import CONFIG_SUITE, REPORT_SUITE, Patch
 from display_measure.session import (
     DECKLINK_INDEX,
     _condition,
@@ -74,17 +74,22 @@ class TestConditioningFrames:
 
 class TestConditioningInASession:
     def test_a_session_conditions_before_every_patch(self, tmp_path: Path) -> None:
-        """More frames than patches means colour went out between them."""
-        patches = len(REPORT_SUITE.patches)
+        """More frames than patches means colour went out between them.
+
+        On the smallest suite there is, because a retained frame is a
+        real one at 12.4 MB and this asserts a count, not a picture. The
+        report suite would retain 9.9 GB to prove the same thing.
+        """
+        patches = len(CONFIG_SUITE.patches)
         with MockBMDDeckLink(DECKLINK_INDEX) as device:
-            device._max_frame_history = 100_000
+            device._max_frame_history = 1000
             characterize(
                 device=device,
                 instrument=PlausibleDisplay(device),
                 out_path=tmp_path / "conditioned.csmf",
                 clock=lambda: FIXED_TIME,
                 settle_seconds=0.0,
-                suite=REPORT_SUITE,
+                suite=CONFIG_SUITE,
                 warmup_seconds=0.01,
                 conditioning_seconds=0.001,
                 read_attempts=1,

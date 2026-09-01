@@ -119,6 +119,10 @@ from display_measure.protocol import (
 from display_measure.session_log import log_events
 from display_measure.wire import RGB12, encode_pixel
 
+# How many driven frames the doubles retain for a test to inspect. A
+# frame is 12.4 MB, so this is a memory budget, not a preference.
+MAX_RETAINED_FRAMES = 128
+
 # Conditions are a property of the protocol (`MeasurementSuite`),
 # not of the session: they are part of what makes two artifacts
 # comparable, and a caller that has to remember them is a caller that
@@ -963,7 +967,15 @@ def doubles_session(
         # full-protocol drive. Widening it here keeps the observability
         # this function promises; an upstream gap worth closing
         # (MockBMDDeckLink hardcodes _max_frame_history).
-        device._max_frame_history = len(suite.patches)
+        #
+        # Bounded, because a retained frame is a real one: 1080p at
+        # 12-bit RGB is 12.4 MB, so one per patch is 0.9 GB across the
+        # verify suite and 9.9 GB across the report suite — more than a
+        # CI runner has, and the reason the test job was killed rather
+        # than failed. The bound holds every frame of a suite small
+        # enough to assert frame by frame, and the newest of a larger
+        # one.
+        device._max_frame_history = min(len(suite.patches), MAX_RETAINED_FRAMES)
         instrument: Instrument
         if hybrid:
             display = PlausibleDisplay(device, encoding=encoding)
