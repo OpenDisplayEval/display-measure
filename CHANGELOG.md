@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/OpenDisplayEval/display-measure/compare/v1.4.0...v1.4.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* gate the input gamut, and put session conditions on the right side of the line ([#8](https://github.com/OpenDisplayEval/display-measure/issues/8)) ([812a988](https://github.com/OpenDisplayEval/display-measure/commit/812a9887998e5ece166a29ef5128a23c3c16696c))
+
 # [1.4.0](https://github.com/OpenDisplayEval/display-measure/compare/v1.3.0...v1.4.0) (2026-09-01)
 
 
