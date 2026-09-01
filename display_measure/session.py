@@ -31,7 +31,6 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
-from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -96,6 +95,7 @@ from display_measure.instrument import (
     xyz,
 )
 from display_measure.plausible_display import MismatchedColorimeter, PlausibleDisplay
+from display_measure.probes import ProbeResult
 from display_measure.processor import (
     ContractViolation,
     TesseraProcessor,
@@ -114,7 +114,6 @@ from display_measure.protocol import (
     WHITE_PATCH,
     MeasurementSuite,
     Patch,
-    ProbeResult,
     presentation_order,
 )
 from display_measure.session_log import log_events
@@ -347,7 +346,7 @@ def _condition(
             int.from_bytes(digest[word * 4 : word * 4 + 4], "big") % (FULL_DRIVE + 1)
             for word in range(3)
         )
-        device.display_frame(_frame(encoding, rgb))  # type: ignore[arg-type]
+        device.display_frame(_frame(encoding, rgb))
         frame += 1
         # Never past the deadline: conditioning is a duration the
         # session was given, and a frame interval is not a reason to
@@ -720,6 +719,15 @@ def _run_probes(
     """
     if not suite.probes:
         return ()
+    if floor is None:
+        # The floor comes from the black the anchors measured. A suite
+        # composing a probe without `anchors` never read one, and a
+        # probe comparing against nothing would call the black reading
+        # itself the first light.
+        raise ValueError(
+            f"{suite.name} composes probes but measured no black to search "
+            "against; compose the `anchors` block ahead of them"
+        )
 
     def read(rgb: tuple[int, int, int]) -> float:
         device.display_frame(_frame(encoding, rgb))
@@ -737,7 +745,7 @@ def _run_probes(
     for probe in suite.probes:
         emit(ProbeStarted(probe.id, probe.max_patches))
         with off_record() if off_record else nullcontext():
-            result = replace(probe, floor=floor).run(read)
+            result = probe.with_floor(floor).run(read)
         emit(ProbeCompleted(probe.id, result.patch_count, dict(result.findings)))
         results.append(result)
     return tuple(results)

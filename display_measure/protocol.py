@@ -19,9 +19,20 @@ patch set or its codes.
 """
 
 import hashlib
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING
+
+from display_measure.codes import (
+    CODE_BITS,
+    FULL_DRIVE,
+    MIN_CODE_SEPARATION,
+    RAMP_FLOOR,
+)
+
+__all__ = ["CODE_BITS", "FULL_DRIVE", "MIN_CODE_SEPARATION", "RAMP_FLOOR"]
+
+if TYPE_CHECKING:
+    from display_measure.probes import Probe
 
 # A wire identifier, not a package name. It outlived the repository it
 # was named in: the session core moved to display-measure, and this
@@ -42,15 +53,6 @@ OCIO_PROTOCOL_NAME = "color-wrangler/characterize/3"
 # not hold, which is the whole reason these are two protocols.
 REPORT_PROTOCOL_NAME = "color-wrangler/report/1"
 
-# Protocol codes are 12-bit RGB whatever link carries them; the wire
-# encoding is a session parameter (`display_measure.wire`), and a
-# narrower link records which of these codes it could represent.
-CODE_BITS = 12
-FULL_DRIVE = 2**CODE_BITS - 1
-
-# Ramps start above the codes lost in the black floor; full drive
-# belongs to the anchor patches.
-RAMP_FLOOR = 16
 
 # Parity with the measure path display-report retired in `dd7425e`, whose
 # CLI defaults these reproduce (`--grey-n`, `--cube-n`, `--black-n`,
@@ -130,14 +132,6 @@ def _even_ramp(floor: int, ceiling: int, samples: int) -> tuple[int, ...]:
     """
     step = (ceiling - floor) / (samples - 1)
     return tuple(round(floor + index * step) for index in range(samples))
-
-
-# The narrowest link a session may declare is 10-bit narrow range: 877
-# levels across the 4096-code grid, one every 4.675 codes. Two protocol
-# codes closer than that are the same patch on that link — measured
-# twice, and read as a ramp inversion the moment either reading carries
-# noise. Five is that step rounded up.
-MIN_CODE_SEPARATION = 5
 
 
 def _merged_ramp(ladder: tuple[int, ...], even: tuple[int, ...]) -> tuple[int, ...]:
@@ -323,11 +317,9 @@ ADDITIVITY = PatchBlock(
 # `dd7425e`, and carry its conditions: its numbers are what the report's
 # analysis reads, and they were measured on a panel held at video-like
 # load. That is why the conditions travel on the block.
-_REPORT_CONDITIONS = {
-    "warmup_seconds": 600.0,
-    "conditioning_seconds": 5.0,
-    "read_attempts": 10,
-}
+REPORT_WARMUP_SECONDS = 600.0
+REPORT_CONDITIONING_SECONDS = 5.0
+REPORT_READ_ATTEMPTS = 10
 
 TRACKING = PatchBlock(
     name="tracking",
@@ -345,7 +337,9 @@ TRACKING = PatchBlock(
         "spacing undersamples the shadows, so this adds to that block "
         "rather than replacing it."
     ),
-    **_REPORT_CONDITIONS,
+    warmup_seconds=REPORT_WARMUP_SECONDS,
+    conditioning_seconds=REPORT_CONDITIONING_SECONDS,
+    read_attempts=REPORT_READ_ATTEMPTS,
 )
 
 NOISE_FLOOR = PatchBlock(
@@ -363,7 +357,9 @@ NOISE_FLOOR = PatchBlock(
         "rule, so the floor describes the session rather than one minute "
         "of it."
     ),
-    **_REPORT_CONDITIONS,
+    warmup_seconds=REPORT_WARMUP_SECONDS,
+    conditioning_seconds=REPORT_CONDITIONING_SECONDS,
+    read_attempts=REPORT_READ_ATTEMPTS,
 )
 
 WHITE_REPEAT = PatchBlock(
@@ -378,7 +374,9 @@ WHITE_REPEAT = PatchBlock(
         "point a distribution rather than a single point for anything "
         "fitting robustly to it."
     ),
-    **_REPORT_CONDITIONS,
+    warmup_seconds=REPORT_WARMUP_SECONDS,
+    conditioning_seconds=REPORT_CONDITIONING_SECONDS,
+    read_attempts=REPORT_READ_ATTEMPTS,
 )
 
 VOLUME_MESH = PatchBlock(
@@ -395,7 +393,9 @@ VOLUME_MESH = PatchBlock(
         "showing it. The largest block by far, and the first to drop "
         "when session time binds."
     ),
-    **_REPORT_CONDITIONS,
+    warmup_seconds=REPORT_WARMUP_SECONDS,
+    conditioning_seconds=REPORT_CONDITIONING_SECONDS,
+    read_attempts=REPORT_READ_ATTEMPTS,
 )
 
 VOLUME_SCATTER = PatchBlock(
@@ -410,7 +410,9 @@ VOLUME_SCATTER = PatchBlock(
         "a regular grid steps over. A hundredth of `volume-mesh`'s cost, "
         "and a different question about coverage, so it is its own block."
     ),
-    **_REPORT_CONDITIONS,
+    warmup_seconds=REPORT_WARMUP_SECONDS,
+    conditioning_seconds=REPORT_CONDITIONING_SECONDS,
+    read_attempts=REPORT_READ_ATTEMPTS,
 )
 
 BLOCKS = {
@@ -426,71 +428,6 @@ BLOCKS = {
         VOLUME_SCATTER,
     )
 }
-
-
-@dataclass(frozen=True)
-class ProbeResult:
-    """What a probe found, and the patches it drove finding it.
-
-    The codes are not bookkeeping. A probe's answer is only auditable
-    against the readings that produced it, and unlike a block those
-    readings are not implied by the probe's id.
-    """
-
-    probe_id: str
-    findings: dict[str, float]
-    driven: tuple[tuple[tuple[int, int, int], float], ...]
-
-    @property
-    def patch_count(self) -> int:
-        return len(self.driven)
-
-
-@runtime_checkable
-class Probe(Protocol):
-    """An adaptive measurement: it decides its next patch from what it read.
-
-    A block's patches are known before the session starts, so they can
-    be shuffled into the presentation and counted for progress. A probe's
-    are not: it is searching for something whose location is a property
-    of the display in front of it, and a fixed code list either misses
-    that or spends its patches bracketing where it is not. First light is
-    the example — on this bench panel red lights at code 6 and green and
-    blue at 8; on another panel it could be 40.
-
-    Three consequences follow, and none of them should be buried
-    (§spec:patch-protocol):
-
-    Its readings are thermally correlated. Each patch depends on the one
-    before, so a probe cannot join the shuffle that decorrelates panel
-    drift from signal level. Probes therefore run after the shuffled
-    blocks, in a block of session time of their own.
-
-    Its cost is a bound, not a count. `max_patches` is what a session can
-    promise; the patches actually driven are known only afterwards.
-
-    Its patch list is a result. What a probe converged on is itself a
-    measurement, so the artifact records the codes it drove alongside
-    what it read — a static block's codes are implied by its id, and a
-    probe's are not.
-    """
-
-    name: str
-    version: int
-    measures: str
-    max_patches: int
-
-    @property
-    def id(self) -> str: ...
-
-    def run(self, read: Callable[[tuple[int, int, int]], float]) -> ProbeResult:
-        """Drive and read patches through `read`, returning what was found.
-
-        `read` drives one RGB code triplet and returns its luminance in
-        cd/m². The probe owns the search; the session owns the drive,
-        the settle, the instrument and the retry.
-        """
-        ...
 
 
 @dataclass(frozen=True)
@@ -518,7 +455,7 @@ class MeasurementSuite:
     # join the shuffle that decorrelates panel drift from signal level,
     # and it needs the anchors measured to have a floor to search
     # against (§spec:patch-protocol).
-    probes: tuple[Probe, ...] = ()
+    probes: tuple["Probe", ...] = ()
     # Until consumers match on blocks, an artifact still carries one
     # string and ocio-display-gen still matches it. A suite whose blocks
     # are exactly what a released protocol named keeps that name here so

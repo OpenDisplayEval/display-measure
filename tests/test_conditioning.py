@@ -11,10 +11,12 @@ occupy, so this is a condition of the measurement, not a nicety.
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
 from bmd_sg.decklink import MockBMDDeckLink
 
 from display_measure.events import UnreadablePatch
+from display_measure.instrument import XYZReading
 from display_measure.plausible_display import PlausibleDisplay
 from display_measure.protocol import REPORT_SUITE, Patch
 from display_measure.session import (
@@ -27,6 +29,9 @@ from display_measure.session import (
 from display_measure.wire import RGB12
 
 FIXED_TIME = datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC)
+
+# What `Stumbling` hands back once it stops stumbling.
+READING = XYZReading(XYZ=np.array([1.0, 1.0, 1.0]))
 
 
 class TestConditioningFrames:
@@ -109,17 +114,26 @@ class TestConditioningInASession:
 
 
 class Stumbling:
-    """An instrument that fails `failures` times, then reads."""
+    """An instrument that fails `failures` times, then reads.
+
+    Satisfies the session's `Instrument` protocol structurally; the
+    reading it returns stands in for one, since what is under test is
+    how many attempts `_read` makes, not what it got back.
+    """
+
+    manufacturer = "test"
+    model = "Stumbling"
+    serial_number = "0"
 
     def __init__(self, failures: int) -> None:
         self.failures = failures
         self.calls = 0
 
-    def measure(self):
+    def measure(self) -> XYZReading:
         self.calls += 1
         if self.calls <= self.failures:
             raise TimeoutError("truncated serial reply")
-        return "a reading"
+        return READING
 
 
 class TestReadRetries:
@@ -128,9 +142,7 @@ class TestReadRetries:
         the link stumbling, not the patch being unreadable."""
         instrument = Stumbling(failures=3)
 
-        assert _read(instrument, Patch("p", (0, 0, 0), "r"), attempts=10) == (
-            "a reading"
-        )
+        assert _read(instrument, Patch("p", (0, 0, 0), "r"), attempts=10) is READING
         assert instrument.calls == 4
 
     def test_a_patch_no_attempt_can_read_fails_the_session(self) -> None:

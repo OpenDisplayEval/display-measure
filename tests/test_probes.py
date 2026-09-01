@@ -6,8 +6,9 @@ first-light probe to the bench panel's measured behaviour: red lights at
 code 6, green and blue at 8, and nothing below emits at all.
 """
 
-from dataclasses import replace
+from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -22,9 +23,9 @@ BENCH_BLACK = 0.000122
 FIXED_TIME = datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC)
 
 
-def probe(floor=BENCH_BLACK):
+def probe(floor: float = BENCH_BLACK) -> FirstLight:
     """The probe as a session builds it: the template plus a measured floor."""
-    return replace(FIRST_LIGHT, floor=floor)
+    return FIRST_LIGHT.with_floor(floor)
 
 
 # What the panel emits at its very first lit code, as a multiple of its
@@ -36,13 +37,15 @@ def probe(floor=BENCH_BLACK):
 FIRST_STEP_OVER_BLACK = 5.4
 
 
-def bench_display(thresholds=None, black=BENCH_BLACK):
+def bench_display(
+    thresholds: dict[str, int] | None = None, black: float = BENCH_BLACK
+) -> Callable[[tuple[int, int, int]], float]:
     """A display that emits nothing below its per-channel threshold."""
     thresholds = thresholds or BENCH_THRESHOLDS
     axes = {"red": 0, "green": 1, "blue": 2}
-    driven = []
+    driven: list[tuple[int, int, int]] = []
 
-    def read(rgb):
+    def read(rgb: tuple[int, int, int]) -> float:
         driven.append(rgb)
         light = 0.0
         for channel, axis in axes.items():
@@ -52,7 +55,6 @@ def bench_display(thresholds=None, black=BENCH_BLACK):
                 light += black * FIRST_STEP_OVER_BLACK * over**2.35
         return black + light
 
-    read.driven = driven
     return read
 
 
@@ -119,7 +121,7 @@ class TestIdentity:
         assert result.probe_id == probe().id
 
     def test_a_probe_satisfies_the_protocol(self) -> None:
-        from display_measure.protocol import Probe
+        from display_measure.probes import Probe
 
         assert isinstance(probe(), Probe)
 
@@ -163,7 +165,9 @@ class TestProbeReadsAreNotArtifactRows:
 
         assert hasattr(HybridInstrument, "off_the_record")
 
-    def test_the_session_routes_probe_reads_without_filing_them(self, tmp_path) -> None:
+    def test_the_session_routes_probe_reads_without_filing_them(
+        self, tmp_path: Path
+    ) -> None:
         """The end-to-end guard: a hybrid report session writes an
         artifact whose routing record still parallels its rows."""
         import yaml

@@ -16,7 +16,7 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -28,6 +28,18 @@ import typer
 # Not deferred: `display_measure.events` is stdlib-only by design, so
 # the lifecycle contract costs `--help` nothing (§spec:session-events).
 from display_measure.events import Cancelled, SessionCancelled
+
+# The patch vocabulary, not the measurement stack: `display_measure.protocol`
+# pulls in hashlib and dataclasses and nothing heavier, so `--help` pays
+# 0.02 s for it. What stays deferred below is numpy, specio and the
+# DeckLink bindings.
+from display_measure.protocol import (
+    BLOCKS,
+    SUITES,
+    MeasurementSuite,
+    PatchBlock,
+    compose,
+)
 
 app = typer.Typer(
     name="display-measure",
@@ -141,7 +153,7 @@ def _parse_timestamp(value: str) -> datetime:
     return parsed
 
 
-def _confirm_panel_state(panel_state) -> None:
+def _confirm_panel_state(panel_state: tuple[tuple[str, str], ...]) -> None:
     """Ask the operator to read the panel back.
 
     None of this is readable from the processor, and all of it moves the
@@ -165,14 +177,19 @@ def _confirm_panel_state(panel_state) -> None:
         raise typer.Exit(2)
 
 
-def _print_blocks(blocks: dict) -> None:
+def _print_blocks(blocks: dict[str, PatchBlock]) -> None:
     """The blocks and what each measures. `--list-blocks`."""
     for block in blocks.values():
         typer.echo(f"{block.id}  ({len(block.patches)} patches)")
         typer.echo(f"    {block.measures}\n")
 
 
-def _resolve_suite(suite_name: str, blocks: str | None, suites: dict, compose):
+def _resolve_suite(
+    suite_name: str,
+    blocks: str | None,
+    suites: dict[str, MeasurementSuite],
+    compose: Callable[..., MeasurementSuite],
+) -> MeasurementSuite:
     """The composition to drive: explicit blocks, else the named preset.
 
     A typo in `--blocks` drives a session measuring the wrong thing and
@@ -371,10 +388,6 @@ def characterize(
     )
     if not doubled and declared.panel_state and not assume_attested:
         _confirm_panel_state(declared.panel_state)
-
-    # Deferred with the rest of the measurement stack: `--help` should
-    # not import a protocol to print a default.
-    from display_measure.protocol import BLOCKS, SUITES, compose
 
     if list_blocks:
         _print_blocks(BLOCKS)

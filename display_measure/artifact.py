@@ -320,7 +320,8 @@ DECLARED_CONTRACT = ProcessorStateSnapshot(
 # What the artifact names a link's samples: RGB, or luma and chroma. A
 # session's protocol codes are RGB either way (§spec:patch-protocol); the
 # sampling says what the device received.
-from display_measure.protocol import CODE_BITS, ProbeResult  # noqa: E402
+from display_measure.codes import CODE_BITS  # noqa: E402
+from display_measure.probes import ProbeResult  # noqa: E402
 
 SAMPLING_RGB = "rgb"
 SAMPLING_YCBCR = "ycbcr"
