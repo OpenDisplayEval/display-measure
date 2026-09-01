@@ -1,3 +1,17 @@
+# [1.4.0](https://github.com/OpenDisplayEval/display-measure/compare/v1.3.0...v1.4.0) (2026-09-01)
+
+
+### Bug Fixes
+
+* **probes:** keep probe reads off the row-parallel routing record ([f24dcfa](https://github.com/OpenDisplayEval/display-measure/commit/f24dcfaaa9d5829f3dbc0163d6f43978df579857))
+* satisfy the type checker, and break the cycle it found ([e6334f1](https://github.com/OpenDisplayEval/display-measure/commit/e6334f191269f52246f008c4afcbe5c49a3c9884))
+* **tests:** bound the frames the doubles retain ([9189956](https://github.com/OpenDisplayEval/display-measure/commit/91899568c20a17ea88512d031a1a56babcaf3cde))
+
+
+### Features
+
+* **protocol:** add probes, the adaptive measurement unit ([cd93f0d](https://github.com/OpenDisplayEval/display-measure/commit/cd93f0d9abb26a2c4024efde33763147af99a6d0))
+
 # [1.3.0](https://github.com/OpenDisplayEval/display-measure/compare/v1.2.0...v1.3.0) (2026-08-31)
 
 
