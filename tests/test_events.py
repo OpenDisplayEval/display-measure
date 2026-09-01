@@ -135,7 +135,7 @@ def test_every_gate_the_session_holds_reports_an_outcome(
     }
     assert verdicts == {
         Gate.CONTRACT_AUDIT: GateVerdict.PASS,
-        Gate.AMBIENT: GateVerdict.STUB,
+        Gate.AMBIENT: GateVerdict.PASS,
         Gate.OUTPUT_LEVEL: GateVerdict.PASS,
         # The only gate that resolves after the protocol: a ramp is not a
         # ramp until it is measured (§road:session-consistency).
@@ -143,7 +143,7 @@ def test_every_gate_the_session_holds_reports_an_outcome(
     }
 
 
-def test_the_ambient_gate_reports_a_stub_rather_than_a_pass(
+def test_the_ambient_gate_records_rather_than_gates_when_no_block_asks(
     display_stream: tuple[SessionEvent, ...],
 ) -> None:
     """Rendering an unrun check as a pass would claim a gate nobody
@@ -153,8 +153,8 @@ def test_the_ambient_gate_reports_a_stub_rather_than_a_pass(
         for event in of_type(display_stream, GateEvaluated)
         if event.gate == Gate.AMBIENT
     )
-    assert ambient.verdict == GateVerdict.STUB
-    assert "§road:session-gates" in ambient.detail
+    assert ambient.verdict == GateVerdict.PASS
+    assert "operating condition" in ambient.detail
 
 
 def test_handoff_carries_the_artifact_path_and_its_real_hash(
@@ -282,7 +282,7 @@ def test_the_log_still_narrates_every_stage(
         "session: characterize",
         "contract audit: PASS",
         "playback:",
-        "ambient gate: STUB",
+        "ambient gate: PASS",
         "output level: PASS",
         "patch drive:",
         "settle:",

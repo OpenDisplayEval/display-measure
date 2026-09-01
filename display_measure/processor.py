@@ -262,6 +262,36 @@ def _gamma_matches(declared: float | None, live: float | None) -> bool:
     return abs(declared - live) <= GAMMA_TOLERANCE
 
 
+class AmbientTooHigh(ContractViolation):
+    """The room is brighter than this composition's numbers assume."""
+
+
+def audit_ambient(measured_floor: float, ceiling: float) -> None:
+    """Refuse a session whose room contaminates what it set out to measure.
+
+    Only some measurements care. A block describing the display — the
+    spread of its black, its response through the volume — is measuring
+    the room instead when ambient reaches the level it is trying to
+    resolve. A block describing the display *in its environment* is not
+    contaminated by ambient at all: it is the operating condition, and a
+    config generated from a black measured in the dark would tell OCIO
+    the shadows go somewhere they do not (§spec:session-gates).
+
+    Refused at the opening black, so a session that cannot produce what
+    it was asked for stops in the first seconds rather than the last.
+    """
+    if measured_floor <= ceiling:
+        return
+    raise AmbientTooHigh(
+        f"ambient floor {measured_floor:.4g} cd/m² exceeds the "
+        f"{ceiling:.4g} cd/m² this composition allows. Blocks describing "
+        "the display need the room dark enough that its black is the "
+        "display's rather than the room's — darken the room, or measure "
+        "a composition that takes the room as an operating condition "
+        "(`--suite config`)."
+    )
+
+
 def audit_output_level(measured_peak: float, declared_intensity: str) -> None:
     """Sane-defaults plausibility on the display's measured white.
 

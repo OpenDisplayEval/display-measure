@@ -106,7 +106,7 @@ class TestConditioningInASession:
         remember them is a caller that will not."""
         assert REPORT_SUITE.warmup_seconds == 600.0
         assert REPORT_SUITE.conditioning_seconds == 5.0
-        assert REPORT_SUITE.read_attempts == 10
+        assert REPORT_SUITE.max_ambient == 0.005
 
     def test_the_ocio_protocol_measures_as_protocol_3_did(self) -> None:
         """It drove solid patches back to back and read each once, and
@@ -115,7 +115,7 @@ class TestConditioningInASession:
 
         assert VERIFY_SUITE.warmup_seconds == 0.0
         assert VERIFY_SUITE.conditioning_seconds == 0.0
-        assert VERIFY_SUITE.read_attempts == 1
+        assert VERIFY_SUITE.max_ambient is None
 
 
 class Stumbling:

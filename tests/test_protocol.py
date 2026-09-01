@@ -46,12 +46,14 @@ class TestBlocksAreTheUnit:
             assert block.patches, f"{block.id} drives nothing"
             assert len(block.measures) > 80, f"{block.id} says nothing it measures"
 
-    def test_patch_names_are_unique_across_every_block(self) -> None:
-        """A session keys readings by patch name, so a name shared
-        between two blocks would silently drop one of the pair."""
-        names = [p.name for block in BLOCKS.values() for p in block.patches]
-
-        assert len(names) == len(set(names))
+    def test_blocks_sharing_a_patch_agree_about_its_codes(self) -> None:
+        """A name is a stimulus. Two blocks may both need one — a paired
+        session's derivation rungs are also response ramp rungs — and
+        the session drives it once, so they must mean the same patch."""
+        codes: dict[str, tuple[int, int, int]] = {}
+        for block in BLOCKS.values():
+            for patch in block.patches:
+                assert codes.setdefault(patch.name, patch.rgb) == patch.rgb
 
     def test_a_block_versions_without_disturbing_the_others(self) -> None:
         """The whole point: adding or bumping one block leaves every
@@ -120,18 +122,20 @@ class TestConditionsTravelWithTheBlock:
         assert bare.conditioning_seconds == 0.0
         assert with_floor.conditioning_seconds == NOISE_FLOOR.conditioning_seconds
         assert with_floor.warmup_seconds == NOISE_FLOOR.warmup_seconds
+        # And the ambient the block's numbers assume comes with it.
+        assert bare.max_ambient is None
+        assert with_floor.max_ambient == NOISE_FLOOR.max_ambient
 
     def test_a_suite_takes_the_strictest_across_its_blocks(self) -> None:
         assert REPORT_SUITE.conditioning_seconds == 5.0
         assert REPORT_SUITE.warmup_seconds == 600.0
-        assert REPORT_SUITE.read_attempts == 10
+        assert REPORT_SUITE.max_ambient == 0.005
 
     def test_the_verify_suite_measures_as_protocol_3_did(self) -> None:
         """Solid patches back to back, one read each — how every
         artifact promoted under that name was measured."""
         assert VERIFY_SUITE.conditioning_seconds == 0.0
         assert VERIFY_SUITE.warmup_seconds == 0.0
-        assert VERIFY_SUITE.read_attempts == 1
 
 
 class TestComposing:
