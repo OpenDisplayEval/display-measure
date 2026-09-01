@@ -31,6 +31,7 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -71,6 +72,8 @@ from display_measure.events import (
     PatchSettling,
     PatchStarted,
     PlaybackStarted,
+    ProbeCompleted,
+    ProbeStarted,
     SessionCancelled,
     SessionEnded,
     SessionMode,
@@ -111,6 +114,7 @@ from display_measure.protocol import (
     WHITE_PATCH,
     MeasurementSuite,
     Patch,
+    ProbeResult,
     presentation_order,
 )
 from display_measure.session_log import log_events
@@ -619,6 +623,20 @@ def _characterize(
         # (§spec:session-events).
         device.stop_playback()
 
+    # Probes run here: after every shuffled patch, because each of a
+    # probe's own patches depends on the reading before it, and because
+    # it searches against the black the anchors just measured.
+    probe_results = _run_probes(
+        suite,
+        device,
+        encoding,
+        instrument,
+        ambient_floor,
+        read_attempts=read_attempts,
+        settle_seconds=settle_seconds,
+        emit=emit,
+    )
+
     session_end = clock()
     patches = suite.patches
     artifact = MeasurementsArtifact(
@@ -646,6 +664,7 @@ def _characterize(
         readings=tuple(xyz(readings[patch.name]) for patch in presented),
         protocol_name=suite.legacy_name or suite.name,
         protocol_blocks=suite.block_ids,
+        probe_results=probe_results,
         presentation_order=tuple(patch.name for patch in presented),
         # An artifact carries what its suite measured and no more. A
         # session composing only `anchors` has no ramps and no
@@ -680,6 +699,41 @@ def _characterize(
     # someone who was not in the room (§road:session-consistency).
     _audit_self_consistency(artifact, emit)
     _handoff(artifact, out_path, emit)
+
+
+def _run_probes(
+    suite: MeasurementSuite,
+    device: PatchDrive,
+    encoding: WireEncoding,
+    instrument: Instrument,
+    floor: float | None,
+    *,
+    read_attempts: int,
+    settle_seconds: float,
+    emit: EventSink,
+) -> tuple[ProbeResult, ...]:
+    """Run the suite's probes, each against the floor the session measured.
+
+    A probe is handed a `read` that drives a code and returns its
+    luminance; everything else — settle, instrument, retry — stays the
+    session's, so a probe holds nothing but its search.
+    """
+    if not suite.probes:
+        return ()
+
+    def read(rgb: tuple[int, int, int]) -> float:
+        device.display_frame(_frame(encoding, rgb))
+        time.sleep(settle_seconds)
+        probe_patch = Patch(f"probe_{rgb[0]}_{rgb[1]}_{rgb[2]}", rgb, role="probe")
+        return luminance(_read(instrument, probe_patch, attempts=read_attempts))
+
+    results = []
+    for probe in suite.probes:
+        emit(ProbeStarted(probe.id, probe.max_patches))
+        result = replace(probe, floor=floor).run(read)
+        emit(ProbeCompleted(probe.id, result.patch_count, dict(result.findings)))
+        results.append(result)
+    return tuple(results)
 
 
 def _measured(patches: tuple[Patch, ...], role: str) -> bool:

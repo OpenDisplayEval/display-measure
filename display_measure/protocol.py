@@ -19,7 +19,9 @@ patch set or its codes.
 """
 
 import hashlib
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 # A wire identifier, not a package name. It outlived the repository it
 # was named in: the session core moved to display-measure, and this
@@ -246,7 +248,13 @@ class PatchBlock:
     requires beyond a version number that moves for reasons unrelated
     to it.
 
-    `needs` states the conditions this block's numbers assume. A suite
+    `measures` says what the block measures, in the display's terms —
+    not who reads it. display-measure imports nothing from its consumers
+    and describes none of them: a consumer states the blocks it requires
+    on its own side, against the ids an artifact records
+    (§spec:patch-protocol).
+
+    The conditions state what this block's numbers assume. A suite
     takes the strictest across the blocks it composes, so composing in
     a block that was measured under panel conditioning brings the
     conditioning with it rather than leaving it to the caller.
@@ -255,7 +263,7 @@ class PatchBlock:
     name: str
     version: int
     patches: tuple[Patch, ...]
-    why: str
+    measures: str
     warmup_seconds: float = 0.0
     conditioning_seconds: float = 0.0
     read_attempts: int = 1
@@ -276,13 +284,11 @@ ANCHORS = PatchBlock(
         Patch("blue", (0, 0, FULL_DRIVE), role="blue_primary"),
         Patch("white", (FULL_DRIVE, FULL_DRIVE, FULL_DRIVE), role="white_point"),
     ),
-    why=(
-        "The display's primaries, white point, black level and peak "
-        "luminance. Every other block is measured against these, and they "
-        "are the whole of what an OCIO config reads — ocio-display-gen "
-        "takes colorimetry.primaries, colorimetry.white_point, "
-        "luminance.black_level and luminance.peak_luminance, and nothing "
-        "else from an artifact."
+    measures=(
+        "The display's primaries and white point as chromaticities, its "
+        "black level and its peak luminance, all in absolute cd/m². The "
+        "corners of what the display can do; every other block is "
+        "measured against these."
     ),
 )
 
@@ -290,13 +296,11 @@ RESPONSE = PatchBlock(
     name="response",
     version=1,
     patches=_channel_ramps(_half_octave_ladder(RAMP_FLOOR, FULL_DRIVE)),
-    why=(
-        "Whether each channel follows the transfer function the contract "
-        "declares. Half-octave spacing is dense where the shadow response "
-        "departs from a power law and sparse where it does not. This "
-        "verifies the model a config assumes rather than feeding it — a "
-        "config generates without these, it just cannot be known to be "
-        "wrong."
+    measures=(
+        "Each channel's luminance against drive level, at half-octave "
+        "code spacing — dense where a shadow response departs from a "
+        "power law, sparse where it does not. Falsifies a declared "
+        "transfer function rather than deriving one."
     ),
 )
 
@@ -308,10 +312,10 @@ ADDITIVITY = PatchBlock(
         Patch("cyan", (0, FULL_DRIVE, FULL_DRIVE), role="additivity_cyan"),
         Patch("magenta", (FULL_DRIVE, 0, FULL_DRIVE), role="additivity_magenta"),
     ),
-    why=(
-        "Whether the channels add. A config built on the primaries assumes "
-        "they do; the secondaries are where that assumption is cheapest to "
-        "falsify. Verification, like `response`."
+    measures=(
+        "The full-drive secondaries, against which the sum of their "
+        "component primaries can be checked. Falsifies channel "
+        "additivity at the one drive level where it is cheapest to test."
     ),
 )
 
@@ -335,11 +339,11 @@ TRACKING = PatchBlock(
             if code not in set(_half_octave_ladder(RAMP_FLOOR, FULL_DRIVE))
         )
     ),
-    why=(
-        "Evenly spaced codes across the range, the independent variable "
-        "display-report's grey-tracking and EOTF-accuracy plots are drawn "
-        "against. Even spacing undersamples the shadows, which is why this "
-        "adds to `response` rather than replacing it."
+    measures=(
+        "Each channel's luminance at evenly spaced codes across the "
+        "range, filling between `response`'s half-octave rungs. Even "
+        "spacing undersamples the shadows, so this adds to that block "
+        "rather than replacing it."
     ),
     **_REPORT_CONDITIONS,
 )
@@ -351,14 +355,13 @@ NOISE_FLOOR = PatchBlock(
         Patch(f"black_{index:02d}", (0, 0, 0), role="noise_floor")
         for index in range(2, BLACK_REPEATS + 1)
     ),
-    why=(
-        "Repeated black readings, past the one `anchors` carries. The "
-        "fidelity report keeps a patch when its luminance above black "
-        "clears the *spread* of these: with a single reading there is no "
-        "spread, the divisor lands at -1.6e-17, and every patch in the "
-        "file is rejected as indistinguishable from black. The repeats "
-        "scatter through the session, so the floor describes the session "
-        "rather than one minute of it."
+    measures=(
+        "The spread across twenty black readings — the floor below which "
+        "this instrument on this display cannot distinguish a patch from "
+        "no light at all. One reading has no spread and measures "
+        "nothing. The repeats scatter through the session by the shuffle "
+        "rule, so the floor describes the session rather than one minute "
+        "of it."
     ),
     **_REPORT_CONDITIONS,
 )
@@ -370,10 +373,10 @@ WHITE_REPEAT = PatchBlock(
         Patch(f"white_{index:02d}", (FULL_DRIVE,) * 3, role="white_repeat")
         for index in range(2, WHITE_REPEATS + 1)
     ),
-    why=(
-        "Repeated full white, past the one `anchors` carries. The primary "
-        "matrix is fitted by an outlier-robust covariance, which wants "
-        "points to be robust over."
+    measures=(
+        "The spread across five full-white readings, giving the white "
+        "point a distribution rather than a single point for anything "
+        "fitting robustly to it."
     ),
     **_REPORT_CONDITIONS,
 )
@@ -385,12 +388,12 @@ VOLUME_MESH = PatchBlock(
         Patch(f"mesh_{index:04d}", rgb, role="volume_mesh")
         for index, rgb in enumerate(MESH_CODES)
     ),
-    why=(
-        "A lattice through the RGB cube's interior. The report clusters "
-        "measured error through the volume; a volume nothing measured "
-        "clusters into empty and duplicate groups, and the chart draws "
-        "anyway. The largest block by far, and the one to drop first when "
-        "session time is the constraint."
+    measures=(
+        "The display's response through the interior of the RGB cube, on "
+        "a regular lattice — where a model fitted to the axes alone is "
+        "unconstrained and can be wrong without any axis measurement "
+        "showing it. The largest block by far, and the first to drop "
+        "when session time binds."
     ),
     **_REPORT_CONDITIONS,
 )
@@ -402,11 +405,10 @@ VOLUME_SCATTER = PatchBlock(
         Patch(f"random_{index:04d}", rgb, role="volume_random")
         for index, rgb in enumerate(RANDOM_CODES)
     ),
-    why=(
-        "Codes off the mesh lattice, so the volume is not sampled only "
-        "where a regular grid happens to land. Separate from `volume-mesh` "
-        "because it is a hundredth of the cost and answers a different "
-        "question about coverage."
+    measures=(
+        "The display's response at codes off the lattice, catching what "
+        "a regular grid steps over. A hundredth of `volume-mesh`'s cost, "
+        "and a different question about coverage, so it is its own block."
     ),
     **_REPORT_CONDITIONS,
 )
@@ -424,6 +426,71 @@ BLOCKS = {
         VOLUME_SCATTER,
     )
 }
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """What a probe found, and the patches it drove finding it.
+
+    The codes are not bookkeeping. A probe's answer is only auditable
+    against the readings that produced it, and unlike a block those
+    readings are not implied by the probe's id.
+    """
+
+    probe_id: str
+    findings: dict[str, float]
+    driven: tuple[tuple[tuple[int, int, int], float], ...]
+
+    @property
+    def patch_count(self) -> int:
+        return len(self.driven)
+
+
+@runtime_checkable
+class Probe(Protocol):
+    """An adaptive measurement: it decides its next patch from what it read.
+
+    A block's patches are known before the session starts, so they can
+    be shuffled into the presentation and counted for progress. A probe's
+    are not: it is searching for something whose location is a property
+    of the display in front of it, and a fixed code list either misses
+    that or spends its patches bracketing where it is not. First light is
+    the example — on this bench panel red lights at code 6 and green and
+    blue at 8; on another panel it could be 40.
+
+    Three consequences follow, and none of them should be buried
+    (§spec:patch-protocol):
+
+    Its readings are thermally correlated. Each patch depends on the one
+    before, so a probe cannot join the shuffle that decorrelates panel
+    drift from signal level. Probes therefore run after the shuffled
+    blocks, in a block of session time of their own.
+
+    Its cost is a bound, not a count. `max_patches` is what a session can
+    promise; the patches actually driven are known only afterwards.
+
+    Its patch list is a result. What a probe converged on is itself a
+    measurement, so the artifact records the codes it drove alongside
+    what it read — a static block's codes are implied by its id, and a
+    probe's are not.
+    """
+
+    name: str
+    version: int
+    measures: str
+    max_patches: int
+
+    @property
+    def id(self) -> str: ...
+
+    def run(self, read: Callable[[tuple[int, int, int]], float]) -> ProbeResult:
+        """Drive and read patches through `read`, returning what was found.
+
+        `read` drives one RGB code triplet and returns its luminance in
+        cd/m². The probe owns the search; the session owns the drive,
+        the settle, the instrument and the retry.
+        """
+        ...
 
 
 @dataclass(frozen=True)
@@ -446,6 +513,12 @@ class MeasurementSuite:
 
     name: str
     blocks: tuple[PatchBlock, ...]
+    # Probes run after every static block, never among them: each of a
+    # probe's patches depends on the reading before it, so it cannot
+    # join the shuffle that decorrelates panel drift from signal level,
+    # and it needs the anchors measured to have a floor to search
+    # against (§spec:patch-protocol).
+    probes: tuple[Probe, ...] = ()
     # Until consumers match on blocks, an artifact still carries one
     # string and ocio-display-gen still matches it. A suite whose blocks
     # are exactly what a released protocol named keeps that name here so
@@ -478,6 +551,20 @@ class MeasurementSuite:
         return tuple(block.id for block in self.blocks)
 
     @property
+    def probe_ids(self) -> tuple[str, ...]:
+        return tuple(probe.id for probe in self.probes)
+
+    @property
+    def max_patches(self) -> int:
+        """What a session can promise up front.
+
+        A bound, not a count, wherever the suite runs a probe: a probe's
+        patches are decided from its readings, so the number driven is
+        known only afterwards.
+        """
+        return len(self.patches) + sum(probe.max_patches for probe in self.probes)
+
+    @property
     def warmup_seconds(self) -> float:
         return max(block.warmup_seconds for block in self.blocks)
 
@@ -489,6 +576,11 @@ class MeasurementSuite:
     def read_attempts(self) -> int:
         return max(block.read_attempts for block in self.blocks)
 
+
+# Imported here, below ProbeResult and above the suites that compose
+# probes: `display_measure.probes` reads ProbeResult from this module,
+# so the dependency runs one way.
+from display_measure.probes import FIRST_LIGHT  # noqa: E402
 
 # What an OCIO config reads, and nothing else. Five patches: a session
 # that only needs a config need not spend an hour proving things the
@@ -518,6 +610,7 @@ REPORT_SUITE = MeasurementSuite(
         VOLUME_MESH,
         VOLUME_SCATTER,
     ),
+    probes=(FIRST_LIGHT,),
 )
 
 SUITES = {suite.name: suite for suite in (CONFIG_SUITE, VERIFY_SUITE, REPORT_SUITE)}

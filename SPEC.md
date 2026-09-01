@@ -270,6 +270,20 @@ whether each follows the declared transfer function, is a separate
 question asked of the config's own assumptions. A config generates
 without those blocks — it just cannot be known to be wrong.
 
+**Some measurements are adaptive, and those are a different unit.** A
+block's patches are fixed and shuffled; a probe's are decided from its
+own readings, because what it searches for sits wherever the display
+puts it and a fixed code list either misses that or brackets where it
+is not. The two are named apart rather than unified, because a probe
+cannot join the shuffle that decorrelates thermal drift from signal
+level, its cost is a bound rather than a count, and its patch list is a
+result rather than an input. Calling both a block would bury all three.
+
+**A probe's codes are recorded, because they are a measurement.** A
+block's codes are implied by its id and need not be written down. A
+probe's answer is auditable only against the readings that produced it,
+so the artifact carries every code it drove and what each read.
+
 **A suite is a label over a composition, not a thing.** It exists so an
 operator can say what a session is for without naming eight blocks. It
 is not what an artifact means, and it is not what a consumer matches

@@ -27,6 +27,41 @@ grow — more measurements to sharpen the OCIO profile — and in a bundle
 those arrive indistinguishable from the verification patches already
 buried there.
 
+## Probes
+
+A **probe** is the second kind of measurement unit: adaptive, where a
+block is static. It decides its next patch from what it just read,
+because it is searching for something whose location is a property of
+the display in front of it.
+
+| Probe | Bound | What it measures |
+| --- | --- | --- |
+| `first-light/1` | 78 patches | The lowest drive code on each channel whose reading clears the noise floor |
+
+**Why not a block.** A static block over codes 1-14 asserts first light
+is in 1-14. On the bench panel red lights at code 6 and green and blue
+at 8; on another panel it could be 40, and the block would either miss
+it or spend its patches bracketing where it is not. Speed is the weaker
+argument — a doubling-then-bisecting search costs about a dozen reads
+per channel against thousands — but it is not why the probe exists.
+
+Three things follow from being adaptive, and none of them is hidden:
+
+- **Its readings are thermally correlated.** Each patch depends on the
+  one before, so a probe cannot join the shuffle that decorrelates panel
+  drift from signal level. Probes therefore run after every shuffled
+  patch, in session time of their own.
+- **Its cost is a bound, not a count.** A session announces
+  `max_patches`; what was actually driven is known afterwards.
+- **Its patch list is a result.** A block's codes are implied by its id;
+  a probe's are not, so the artifact records every code it drove and
+  what each read. A probe's answer is auditable only against those.
+
+A probe searches against a floor the session measured, so it needs
+`anchors` (and `noise-floor` for a floor with a spread) composed ahead
+of it. A probe handed no floor refuses rather than comparing readings
+against zero, which would call the black reading itself the first light.
+
 ## Suites
 
 A suite is a named composition, a label rather than a thing. What an
@@ -36,7 +71,7 @@ artifact records, and what a consumer matches on, is the block list.
 | --- | --- | --- | --- |
 | `config` | `anchors` | 5 | minutes |
 | `verify` | `anchors`, `response`, `additivity` | 72 | ~10 min |
-| `report` | all eight | 795 | ~110 min |
+| `report` | all eight, plus `first-light/1` | 795 + up to 78 | ~110 min |
 
 `--suite` selects a preset; `--blocks anchors,noise-floor` composes
 directly; `--list-blocks` prints the blocks and what reads each.

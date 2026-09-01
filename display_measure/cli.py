@@ -166,10 +166,10 @@ def _confirm_panel_state(panel_state) -> None:
 
 
 def _print_blocks(blocks: dict) -> None:
-    """The blocks, and what reads each. `--list-blocks`."""
+    """The blocks and what each measures. `--list-blocks`."""
     for block in blocks.values():
         typer.echo(f"{block.id}  ({len(block.patches)} patches)")
-        typer.echo(f"    {block.why}\n")
+        typer.echo(f"    {block.measures}\n")
 
 
 def _resolve_suite(suite_name: str, blocks: str | None, suites: dict, compose):

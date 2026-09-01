@@ -320,7 +320,7 @@ DECLARED_CONTRACT = ProcessorStateSnapshot(
 # What the artifact names a link's samples: RGB, or luma and chroma. A
 # session's protocol codes are RGB either way (§spec:patch-protocol); the
 # sampling says what the device received.
-from display_measure.protocol import CODE_BITS  # noqa: E402
+from display_measure.protocol import CODE_BITS, ProbeResult  # noqa: E402
 
 SAMPLING_RGB = "rgb"
 SAMPLING_YCBCR = "ycbcr"
@@ -470,6 +470,11 @@ class MeasurementsArtifact:
     # than a bundle version that moves for reasons unrelated to it
     # (§spec:patch-protocol). `protocol_name` is the label beside it.
     protocol_blocks: tuple[str, ...] | None = None
+    # What each probe found, and every patch it drove finding it. A
+    # static block's codes are implied by its id; a probe's are a
+    # result, so they are recorded rather than reconstructed
+    # (§spec:patch-protocol).
+    probe_results: tuple[ProbeResult, ...] = ()
     presentation_order: tuple[str, ...] | None = None
     per_channel_response: PerChannelResponse | None = None
     gray_response: tuple[ResponsePoint, ...] | None = None
@@ -636,6 +641,29 @@ def _protocol_lines(artifact: MeasurementsArtifact) -> list[str]:
             "  blocks:",
             *(f'    - "{block}"' for block in artifact.protocol_blocks),
         ]
+    if artifact.probe_results:
+        lines += [
+            "  # Adaptive measurements: what each probe found, and every",
+            "  # patch it drove finding it. A block's codes are implied by",
+            "  # its id; a probe's are a result.",
+            "  probes:",
+        ]
+        for result in artifact.probe_results:
+            lines += [
+                f'    - id: "{result.probe_id}"',
+                "      findings:",
+                *(
+                    f"        {key}: "
+                    + ("null" if value is None else _fmt(float(value)))
+                    for key, value in result.findings.items()
+                ),
+                "      driven:",
+                *(
+                    f"        - {{ rgb: [{rgb[0]}, {rgb[1]}, {rgb[2]}], "
+                    f"luminance: {_fmt(luminance)} }}"
+                    for rgb, luminance in result.driven
+                ),
+            ]
     lines += [
         "  presentation_order:",
         *(f'    - "{name}"' for name in artifact.presentation_order),

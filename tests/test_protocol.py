@@ -37,14 +37,14 @@ def by_name(patches: tuple[Patch, ...]) -> dict[str, Patch]:
 
 class TestBlocksAreTheUnit:
     def test_every_block_is_named_versioned_and_explains_itself(self) -> None:
-        """A block that cannot say what reads it is a bundle with fewer
-        patches, which is the thing blocks exist to stop being."""
+        """A block that cannot say what it measures is a bundle with
+        fewer patches, which is the thing blocks exist to stop being."""
         for name, block in BLOCKS.items():
             assert block.name == name
             assert block.version >= 1
             assert block.id == f"{name}/{block.version}"
             assert block.patches, f"{block.id} drives nothing"
-            assert len(block.why) > 80, f"{block.id} does not say what reads it"
+            assert len(block.measures) > 80, f"{block.id} says nothing it measures"
 
     def test_patch_names_are_unique_across_every_block(self) -> None:
         """A session keys readings by patch name, so a name shared
