@@ -49,6 +49,10 @@ app = typer.Typer(
 
 DEFAULT_SETTLE_SECONDS = 0.5
 
+# Restated so `--help` costs no measurement stack; checked against the
+# session's own value in the tests.
+DEFAULT_READ_ATTEMPTS = 10
+
 
 class SuiteChoice(StrEnum):
     """A preset composition of measurement blocks.
@@ -295,15 +299,17 @@ def characterize(
             "defaults to what the chosen protocol specifies."
         ),
     ),
-    read_attempts: int | None = typer.Option(
-        None,
+    read_attempts: int = typer.Option(
+        DEFAULT_READ_ATTEMPTS,
         "--read-attempts",
         min=1,
         help=(
             "Attempts at each patch before the session fails. The "
             "instrument's failures at the bottom of a panel are "
             "transient; a session of hundreds of patches should not be "
-            "lost to one of them. Defaults to the chosen protocol's."
+            "lost to one of them. A session parameter, not a property "
+            "of what is being measured: a stumbling link is a stumbling "
+            "link whichever blocks are composed."
         ),
     ),
     wire: WireChoice = typer.Option(

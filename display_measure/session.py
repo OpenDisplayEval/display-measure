@@ -62,6 +62,7 @@ from display_measure.consistency import InconsistentSession
 from display_measure.events import (
     Cancelled,
     EventSink,
+    ExposureRaised,
     Gate,
     GateEvaluated,
     GateVerdict,
@@ -79,6 +80,7 @@ from display_measure.events import (
     SessionStarted,
     UnreadablePatch,
 )
+from display_measure.exposure import DEFAULT_LADDER, ExposureRung
 from display_measure.hybrid import (
     DEFAULT_LUMINANCE_THRESHOLD,
     DerivationRefused,
@@ -100,7 +102,9 @@ from display_measure.processor import (
     ContractViolation,
     TesseraProcessor,
     WireFormat,
+    audit_ambient,
     audit_contract,
+    audit_input_gamut,
     audit_output_level,
     audit_output_scaling,
     audit_wire_format,
@@ -108,6 +112,7 @@ from display_measure.processor import (
 )
 from display_measure.protocol import (
     BLACK_PATCH,
+    DERIVATION,
     FULL_DRIVE,
     OPENING_PINS,
     VERIFY_SUITE,
@@ -118,6 +123,16 @@ from display_measure.protocol import (
 )
 from display_measure.session_log import log_events
 from display_measure.wire import RGB12, encode_pixel
+
+# Attempts at a reading before a session gives up on the patch.
+#
+# Not a property of the measurement, and so not a property of a block:
+# a timed-out integration or a truncated serial reply says the link
+# stumbled, whatever was being measured. Treating it as a measurement
+# condition cost a bench session its first run — the config suite
+# inherited a single attempt from `anchors`, and one truncated reply
+# ended a session that a retry would have carried.
+DEFAULT_READ_ATTEMPTS = 10
 
 # How many driven frames the doubles retain for a test to inspect. A
 # frame is 12.4 MB, so this is a memory budget, not a preference.
@@ -358,6 +373,63 @@ def _condition(
         time.sleep(min(CONDITIONING_INTERVAL, max(0.0, deadline - time.monotonic())))
 
 
+def _set_exposure(instrument: Instrument, rung: ExposureRung) -> bool:
+    """Apply `rung` to whatever of it the instrument supports.
+
+    Structural, like the rest of the seam: a colorimeter has no
+    measurement speed and the doubles have neither, and none of them
+    should have to pretend. Returns whether anything was applied, so a
+    caller does not climb a ladder the instrument cannot climb.
+    """
+    applied = False
+    if rung.speed is not None and hasattr(instrument, "measurement_speed"):
+        try:
+            kind = type(instrument).MeasurementSpeed  # type: ignore[attr-defined]
+            instrument.measurement_speed = kind(rung.speed)
+            applied = True
+        except Exception:
+            pass
+    if hasattr(instrument, "average_samples"):
+        try:
+            instrument.average_samples = rung.average_samples
+            applied = True
+        except Exception:
+            pass
+    return applied
+
+
+def _read_at_depth(
+    instrument: Instrument,
+    patch: Patch,
+    *,
+    attempts: int,
+    ladder: tuple[ExposureRung, ...],
+    emit: EventSink,
+    index: int,
+) -> InstrumentReading:
+    """Read `patch`, climbing the exposure ladder while the reading is
+    below what the current rung can resolve.
+
+    Escalation is on what came back, not on a guess about what will: the
+    display's response is the thing being measured, so its code says
+    little about its luminance. One extra read at the bottom of the
+    range is cheap against reporting the instrument's floor as the
+    display's.
+    """
+    reading = None
+    for position, rung in enumerate(ladder):
+        if position and not _set_exposure(instrument, rung):
+            # Nothing to climb — this instrument has no such knob.
+            break
+        if position:
+            emit(ExposureRaised(index, patch.name, rung.label, rung.trustworthy_above))
+        reading = _read(instrument, patch, attempts=attempts)
+        if luminance(reading) > rung.trustworthy_above:
+            return reading
+    assert reading is not None
+    return reading
+
+
 def _read(
     instrument: Instrument, patch: Patch, *, attempts: int = 1
 ) -> InstrumentReading:
@@ -381,10 +453,34 @@ def _read(
         except DerivationRefused:
             raise
         except Exception as failure:
+            # An instrument that measured and found the light outside
+            # what it can report has answered the question. Asking again
+            # spends the integration to be told the same true thing —
+            # ten times sixty-five seconds, on a CR-300 at slow speed,
+            # is eleven minutes to learn nothing (§spec:sessions).
+            if _is_out_of_range(failure):
+                raise
             last = failure
     raise UnreadablePatch(
         f"no reading for patch {patch.name!r} in {attempts} attempts"
     ) from last
+
+
+# What a driver calls the condition "I measured, and the light is
+# outside what I can report". Matched by name rather than imported: the
+# session reads instruments through protocols and does not depend on any
+# one driver, and the doubles raise nothing of the sort.
+OUT_OF_RANGE_ERROR = "MeasurementOutOfRange"
+
+
+def _is_out_of_range(failure: BaseException) -> bool:
+    """Whether an instrument said the light is outside its range.
+
+    A result, not a failure to obtain one — the instrument integrated
+    and reported what it found. A session records it and moves on, or
+    routes the patch to something more sensitive.
+    """
+    return any(base.__name__ == OUT_OF_RANGE_ERROR for base in type(failure).__mro__)
 
 
 def _log_instrument(instrument: Instrument, note: str = "") -> None:
@@ -456,7 +552,7 @@ def characterize(
     suite: MeasurementSuite,
     warmup_seconds: float | None = None,
     conditioning_seconds: float | None = None,
-    read_attempts: int | None = None,
+    read_attempts: int = DEFAULT_READ_ATTEMPTS,
     seed: int = 0,
     encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
@@ -506,7 +602,6 @@ def characterize(
         if conditioning_seconds is None
         else conditioning_seconds
     )
-    read_attempts = suite.read_attempts if read_attempts is None else read_attempts
 
     with _session_outcome(emit, clock):
         _characterize(
@@ -601,6 +696,13 @@ def _characterize(
     disciplined = instrument if isinstance(instrument, DisciplinedInstrument) else None
     pinned = OPENING_PINS
     if disciplined is not None:
+        # A paired instrument derives its correction from rungs that are
+        # a measurement in their own right, so they are a block, and a
+        # session composes it rather than assuming whatever suite it was
+        # given happens to carry them. Without this a config-suite
+        # hybrid session failed deep in the shuffle, naming a patch the
+        # composition never had.
+        suite = suite.with_blocks(DERIVATION)
         pinned = (*disciplined.derivation_patches(), *OPENING_PINS)
     presented = presentation_order(suite.patches, seed, pinned=pinned)
     try:
@@ -615,6 +717,7 @@ def _characterize(
             read_attempts=read_attempts,
             seed=seed,
             declared_intensity=declared.intensity,
+            max_ambient=suite.max_ambient,
             emit=emit,
             cancelled=cancelled,
         )
@@ -830,6 +933,7 @@ def _drive_presentation(
     read_attempts: int,
     seed: int,
     declared_intensity: str,
+    max_ambient: float | None,
     emit: EventSink,
     cancelled: Cancelled,
 ) -> tuple[dict[str, InstrumentReading], tuple[float, ...], float]:
@@ -872,7 +976,14 @@ def _drive_presentation(
         # inside the instrument, so the read is where the session can
         # name it.
         with _gate(emit, Gate.DERIVATION_FITNESS, (DerivationRefused,)):
-            measurement = _read(instrument, patch, attempts=read_attempts)
+            measurement = _read_at_depth(
+                instrument,
+                patch,
+                attempts=read_attempts,
+                ladder=DEFAULT_LADDER,
+                emit=emit,
+                index=index,
+            )
         seconds = (clock() - began).total_seconds()
         readings[patch.name] = measurement
         patch_seconds.append(seconds)
@@ -883,14 +994,32 @@ def _drive_presentation(
             # refusal §road:session-gates adds has to stop a session
             # early to be worth anything.
             ambient_floor = ambient_gate(measurement)
-            emit(
-                GateEvaluated(
-                    Gate.AMBIENT,
-                    GateVerdict.STUB,
-                    f"recorded floor {ambient_floor:.4f} cd/m²; budget not "
-                    "enforced (§road:session-gates)",
+            # Enforced only where a composed block demands it. A block
+            # describing the display is contaminated by room light; a
+            # block describing the display in its environment is not,
+            # and an OCIO config renders into whatever ambient a venue
+            # has (§spec:session-gates).
+            if max_ambient is None:
+                emit(
+                    GateEvaluated(
+                        Gate.AMBIENT,
+                        GateVerdict.PASS,
+                        f"floor {ambient_floor:.4f} cd/m²; recorded as an "
+                        "operating condition, not gated — no block here "
+                        "describes the display apart from its room",
+                    )
                 )
-            )
+            else:
+                with _gate(emit, Gate.AMBIENT):
+                    audit_ambient(ambient_floor, max_ambient)
+                emit(
+                    GateEvaluated(
+                        Gate.AMBIENT,
+                        GateVerdict.PASS,
+                        f"floor {ambient_floor:.4f} cd/m² within the "
+                        f"{max_ambient:.4f} this composition allows",
+                    )
+                )
         elif patch.name == WHITE_PATCH:
             # Gated where white is read, which protocol 3 pins second:
             # the contract audit established what the processor claims,
@@ -1030,6 +1159,10 @@ def _audit_processor(
     reading = audit_contract(declared, state_from_tessera(global_colour))
     audit_output_scaling(global_colour)
     audit_wire_format(WireFormat.for_encoding(encoding), processor.input_metadata())
+    # Last, and it is the one that decides whether the codes mean what
+    # the protocol says they mean: the active port has to pass colour
+    # through, or the session measures a transform and calls it a panel.
+    audit_input_gamut(processor.input_gamut(), processor.panel_gamut())
     return reading
 
 
@@ -1041,7 +1174,7 @@ def hardware_session(
     suite: MeasurementSuite = VERIFY_SUITE,
     warmup_seconds: float | None = None,
     conditioning_seconds: float | None = None,
-    read_attempts: int | None = None,
+    read_attempts: int = DEFAULT_READ_ATTEMPTS,
     hybrid: bool = False,
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
     processor_host: str | None = None,

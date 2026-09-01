@@ -262,6 +262,36 @@ def _gamma_matches(declared: float | None, live: float | None) -> bool:
     return abs(declared - live) <= GAMMA_TOLERANCE
 
 
+class AmbientTooHigh(ContractViolation):
+    """The room is brighter than this composition's numbers assume."""
+
+
+def audit_ambient(measured_floor: float, ceiling: float) -> None:
+    """Refuse a session whose room contaminates what it set out to measure.
+
+    Only some measurements care. A block describing the display — the
+    spread of its black, its response through the volume — is measuring
+    the room instead when ambient reaches the level it is trying to
+    resolve. A block describing the display *in its environment* is not
+    contaminated by ambient at all: it is the operating condition, and a
+    config generated from a black measured in the dark would tell OCIO
+    the shadows go somewhere they do not (§spec:session-gates).
+
+    Refused at the opening black, so a session that cannot produce what
+    it was asked for stops in the first seconds rather than the last.
+    """
+    if measured_floor <= ceiling:
+        return
+    raise AmbientTooHigh(
+        f"ambient floor {measured_floor:.4g} cd/m² exceeds the "
+        f"{ceiling:.4g} cd/m² this composition allows. Blocks describing "
+        "the display need the room dark enough that its black is the "
+        "display's rather than the room's — darken the room, or measure "
+        "a composition that takes the room as an operating condition "
+        "(`--suite config`)."
+    )
+
+
 def audit_output_level(measured_peak: float, declared_intensity: str) -> None:
     """Sane-defaults plausibility on the display's measured white.
 
@@ -406,6 +436,66 @@ def audit_wire_format(declared: WireFormat, live: InputMetadata) -> None:
         )
 
 
+# How far an input primary may sit from the panel's own before the
+# processor is transforming rather than passing through. The two are
+# stated to four decimals and round differently — 0.1348 against 0.1349
+# — so this is a rounding tolerance, not a similarity threshold.
+GAMUT_IDENTITY_TOLERANCE = 0.002
+
+
+class GamutTransformInPath(ContractViolation):
+    """The processor is mapping the input gamut into the panel's.
+
+    Which makes the driven codes something other than device-referred,
+    and the whole protocol rests on their being device-referred.
+    """
+
+
+def audit_input_gamut(
+    input_gamut: dict[str, tuple[float, float]],
+    panel_gamut: dict[str, tuple[float, float]],
+    *,
+    tolerance: float = GAMUT_IDENTITY_TOLERANCE,
+) -> None:
+    """Refuse unless the active port passes colour through untransformed.
+
+    A characterize session drives raw code values and records what came
+    back as the display's own primaries. That holds only while the
+    processor maps the input gamut onto the panel's one-for-one. Point
+    the input at Rec.2020 and full-drive red asks for Rec.2020 red, which
+    the processor gamut-maps into the panel — so the artifact's "red
+    primary" describes a transform, and every consumer downstream
+    inherits it (§spec:signal-contract).
+
+    Nothing else catches this. The reading is plausible, the ramps rise,
+    the session passes every other gate, and the number is wrong.
+    """
+    drifted = []
+    for channel in ("red", "green", "blue"):
+        source = input_gamut.get(channel)
+        panel = panel_gamut.get(channel)
+        if source is None or panel is None:
+            continue
+        if (
+            abs(source[0] - panel[0]) > tolerance
+            or abs(source[1] - panel[1]) > tolerance
+        ):
+            drifted.append(
+                f"{channel}: input ({source[0]:.4f}, {source[1]:.4f}) "
+                f"against panel ({panel[0]:.4f}, {panel[1]:.4f})"
+            )
+    if not drifted:
+        return
+    raise GamutTransformInPath(
+        "the active input port does not pass colour through: "
+        + "; ".join(drifted)
+        + ". A characterize session drives device-referred codes and "
+        "records what returns as the panel's own primaries, which a "
+        "gamut transform in the path makes false. Set the input colour "
+        "space to match the panel's achievable gamut."
+    )
+
+
 class TesseraProcessor:
     """Read-only Brompton Tessera HTTP client (§spec:sessions).
 
@@ -432,6 +522,41 @@ class TesseraProcessor:
     def read_state(self) -> ProcessorStateSnapshot:
         """The processor's colour state as the artifact records it."""
         return state_from_tessera(self.global_colour())
+
+    def input_gamut(self) -> dict[str, tuple[float, float]]:
+        """The active port's source primaries, as the processor holds them."""
+        active = self._get("input/active/source")["source"]
+        port_type, port = active["port-type"], active["port-number"]
+        ports = self._get(f"input/ports/{port_type}")[port_type]
+        node = ports.get(str(port - 1)) or ports.get(str(port))
+        if node is None or "dynacal" not in node:
+            raise ContractViolation(
+                f"processor reports active {port_type} port {port}, whose "
+                "input colour space it does not expose; a session cannot "
+                "confirm the codes it drives reach the panel untransformed"
+            )
+        dynacal = node["dynacal"]
+        return {
+            channel: (float(dynacal[channel]["x"]), float(dynacal[channel]["y"]))
+            for channel in ("red", "green", "blue")
+            if channel in dynacal
+        }
+
+    def panel_gamut(self) -> dict[str, tuple[float, float]]:
+        """The panel's own primaries, as the processor holds them."""
+        panels = self._get("output/dynacal")["dynacal"]
+        if len(panels) != 1:
+            raise ContractViolation(
+                f"processor reports {len(panels)} panel types under "
+                "output/dynacal; a session cannot tell which one it is "
+                "driving"
+            )
+        node = next(iter(panels.values()))
+        return {
+            channel: (float(node[channel]["x"]), float(node[channel]["y"]))
+            for channel in ("red", "green", "blue")
+            if channel in node
+        }
 
     def input_metadata(self) -> InputMetadata:
         """What the processor reports it is receiving on the active port."""

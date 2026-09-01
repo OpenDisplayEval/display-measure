@@ -255,6 +255,23 @@ class ProbeCompleted(SessionEvent):
     findings: dict[str, float | None]
 
 
+@dataclass(frozen=True)
+class ExposureRaised(SessionEvent):
+    """A reading landed below what its exposure could resolve, so the
+    session climbed and read again.
+
+    Announced because it is the difference between a number that
+    describes the display and one that describes the instrument, and a
+    session that climbed silently would leave no way to tell which a row
+    is (§spec:session-events).
+    """
+
+    index: int
+    patch: str
+    rung: str
+    below: float
+
+
 class UnreadablePatch(RuntimeError):
     """Every attempt at one patch failed, so the artifact cannot be whole.
 

@@ -122,7 +122,7 @@ def test_artifact_records_the_protocol_and_unshuffle_key(
 def test_every_stage_is_observable_in_the_session_log(display_log: str) -> None:
     for marker in (
         "contract audit: PASS",
-        "ambient gate: STUB",
+        "ambient gate: PASS",
         "patch drive:",
         "settle:",
         "instrument read:",

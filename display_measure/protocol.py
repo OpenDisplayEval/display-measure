@@ -19,7 +19,7 @@ patch set or its codes.
 """
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from display_measure.codes import (
@@ -260,7 +260,21 @@ class PatchBlock:
     measures: str
     warmup_seconds: float = 0.0
     conditioning_seconds: float = 0.0
-    read_attempts: int = 1
+    # The ambient this block's numbers assume, cd/m², or None where the
+    # block takes the room as it finds it.
+    #
+    # The split is what the measurement is *about*. A block describing
+    # the display — the spread of its black, its response through the
+    # volume — is contaminated by room light, and a session that cannot
+    # exclude it is measuring the room. A block describing the display
+    # *in its environment* is not: an OCIO config renders into whatever
+    # ambient the venue has, and a black level measured in the dark
+    # would tell it the shadows go somewhere they do not.
+    #
+    # So `noise-floor` demands darkness and `anchors` demands nothing,
+    # and a suite composing both takes the stricter — which is correct,
+    # because a report session wants both measured in the dark.
+    max_ambient: float | None = None
 
     @property
     def id(self) -> str:
@@ -319,7 +333,30 @@ ADDITIVITY = PatchBlock(
 # load. That is why the conditions travel on the block.
 REPORT_WARMUP_SECONDS = 600.0
 REPORT_CONDITIONING_SECONDS = 5.0
-REPORT_READ_ATTEMPTS = 10
+# Ambient a report-grade block tolerates, cd/m². Well under this bench
+# panel's own black (~0.0014 by colorimeter), so the noise floor a
+# report filters against is the display's and not the room's. Not a
+# universal constant — a brighter panel tolerates more — which is why a
+# session can override it.
+DERIVATION_CODE = 2048
+
+DERIVATION = PatchBlock(
+    name="derivation",
+    version=1,
+    patches=_channel_ramps((DERIVATION_CODE,))[:3],
+    measures=(
+        "Each primary at half drive, read by both instruments of a "
+        "paired session, against which a colorimeter's filter mismatch "
+        "on this display's emitters is solved. Half drive because a "
+        "colorimeter's ceiling sits far below a show display's peak, and "
+        "an anchor neither instrument can read is no anchor; an LED "
+        "primary's spectrum barely moves with drive level, which is what "
+        "filter mismatch responds to, so a dimmer rung samples the same "
+        "emitter."
+    ),
+)
+
+REPORT_MAX_AMBIENT = 0.005
 
 TRACKING = PatchBlock(
     name="tracking",
@@ -339,7 +376,7 @@ TRACKING = PatchBlock(
     ),
     warmup_seconds=REPORT_WARMUP_SECONDS,
     conditioning_seconds=REPORT_CONDITIONING_SECONDS,
-    read_attempts=REPORT_READ_ATTEMPTS,
+    max_ambient=REPORT_MAX_AMBIENT,
 )
 
 NOISE_FLOOR = PatchBlock(
@@ -359,7 +396,7 @@ NOISE_FLOOR = PatchBlock(
     ),
     warmup_seconds=REPORT_WARMUP_SECONDS,
     conditioning_seconds=REPORT_CONDITIONING_SECONDS,
-    read_attempts=REPORT_READ_ATTEMPTS,
+    max_ambient=REPORT_MAX_AMBIENT,
 )
 
 WHITE_REPEAT = PatchBlock(
@@ -376,7 +413,7 @@ WHITE_REPEAT = PatchBlock(
     ),
     warmup_seconds=REPORT_WARMUP_SECONDS,
     conditioning_seconds=REPORT_CONDITIONING_SECONDS,
-    read_attempts=REPORT_READ_ATTEMPTS,
+    max_ambient=REPORT_MAX_AMBIENT,
 )
 
 VOLUME_MESH = PatchBlock(
@@ -395,7 +432,7 @@ VOLUME_MESH = PatchBlock(
     ),
     warmup_seconds=REPORT_WARMUP_SECONDS,
     conditioning_seconds=REPORT_CONDITIONING_SECONDS,
-    read_attempts=REPORT_READ_ATTEMPTS,
+    max_ambient=REPORT_MAX_AMBIENT,
 )
 
 VOLUME_SCATTER = PatchBlock(
@@ -412,13 +449,14 @@ VOLUME_SCATTER = PatchBlock(
     ),
     warmup_seconds=REPORT_WARMUP_SECONDS,
     conditioning_seconds=REPORT_CONDITIONING_SECONDS,
-    read_attempts=REPORT_READ_ATTEMPTS,
+    max_ambient=REPORT_MAX_AMBIENT,
 )
 
 BLOCKS = {
     block.name: block
     for block in (
         ANCHORS,
+        DERIVATION,
         RESPONSE,
         ADDITIVITY,
         TRACKING,
@@ -465,22 +503,30 @@ class MeasurementSuite:
 
     @property
     def patches(self) -> tuple[Patch, ...]:
-        """Every block's patches, in block order.
+        """Every block's patches, in block order, each driven once.
 
-        Names are unique across blocks by construction, and the session
-        keys readings by name, so a duplicate would silently drop a
-        reading. Checked rather than assumed.
+        Two blocks may need the same patch — a paired session derives
+        its correction from rungs the response ramp also carries — and
+        the session drives it once. Both blocks read the same row, which
+        is what sharing a patch means; driving it twice would measure
+        the display at two moments and call them one measurement.
+
+        One name is one stimulus, so blocks that disagree about a
+        patch's codes are refused rather than silently resolved.
         """
-        patches = tuple(patch for block in self.blocks for patch in block.patches)
-        names = [patch.name for patch in patches]
-        if len(names) != len(set(names)):
-            duplicated = sorted({n for n in names if names.count(n) > 1})
-            raise ValueError(
-                f"suite {self.name!r} composes blocks that share patch "
-                f"names: {duplicated}. A session keys readings by name, so "
-                "one of each pair would be lost with no error."
-            )
-        return patches
+        seen: dict[str, Patch] = {}
+        for block in self.blocks:
+            for patch in block.patches:
+                previous = seen.get(patch.name)
+                if previous is None:
+                    seen[patch.name] = patch
+                elif previous.rgb != patch.rgb:
+                    raise ValueError(
+                        f"suite {self.name!r} composes blocks that disagree "
+                        f"about patch {patch.name!r}: {previous.rgb} and "
+                        f"{patch.rgb}. One name is one stimulus."
+                    )
+        return tuple(seen.values())
 
     @property
     def block_ids(self) -> tuple[str, ...]:
@@ -509,9 +555,30 @@ class MeasurementSuite:
     def conditioning_seconds(self) -> float:
         return max(block.conditioning_seconds for block in self.blocks)
 
+    def with_blocks(self, *blocks: PatchBlock) -> "MeasurementSuite":
+        """This suite plus `blocks`, skipping any it already composes.
+
+        For a need the session discovers rather than the operator
+        declaring it — a paired instrument's derivation rungs. The
+        artifact records the result, so what was driven and why stays
+        legible.
+        """
+        present = {block.name for block in self.blocks}
+        extra = tuple(b for b in blocks if b.name not in present)
+        if not extra:
+            return self
+        return replace(self, blocks=(*self.blocks, *extra))
+
     @property
-    def read_attempts(self) -> int:
-        return max(block.read_attempts for block in self.blocks)
+    def max_ambient(self) -> float | None:
+        """The strictest ceiling across the composed blocks, or None.
+
+        None means no block in this composition is describing the
+        display in isolation, so the room is an operating condition
+        rather than a contaminant.
+        """
+        ceilings = [b.max_ambient for b in self.blocks if b.max_ambient is not None]
+        return min(ceilings) if ceilings else None
 
 
 # Imported here, below ProbeResult and above the suites that compose
