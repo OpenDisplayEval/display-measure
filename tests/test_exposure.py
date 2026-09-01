@@ -11,6 +11,7 @@ import pytest
 
 from display_measure.exposure import (
     DEFAULT_LADDER,
+    MAX_READ_SECONDS,
     ExposureRung,
     instrument_floor,
     rung_for,
@@ -20,10 +21,29 @@ from display_measure.exposure import (
 class TestTheLadder:
     def test_it_climbs_from_cheap_to_deep(self) -> None:
         thresholds = [rung.trustworthy_above for rung in DEFAULT_LADDER]
-        seconds = [rung.seconds for rung in DEFAULT_LADDER]
 
         assert thresholds == sorted(thresholds, reverse=True)
-        assert seconds == sorted(seconds)
+
+    def test_no_rung_can_wedge_the_instrument_past_the_budget(self) -> None:
+        """An in-flight read cannot be cancelled: the instrument has no
+        abort, and a host that stops listening leaves it integrating
+        regardless. A rung's ceiling is therefore time no operator can
+        take back, and the ladder is capped rather than trusted."""
+        for rung in DEFAULT_LADDER:
+            assert rung.ceiling_seconds <= MAX_READ_SECONDS, rung.label
+
+    def test_an_over_budget_rung_cannot_be_built(self) -> None:
+        """Caught at construction, not at the bench. A `slow x32` rung
+        holds the instrument for 2240 s — most of an hour, and across a
+        795-patch session's dark end, most of a day."""
+        with pytest.raises(ValueError, match="cannot be cancelled"):
+            ExposureRung(speed="slow", average_samples=32, trustworthy_above=0.0)
+
+    def test_a_rung_costs_what_the_driver_actually_charges(self) -> None:
+        """Derived from the driver's own timeout formula. Inventing this
+        number understated every rung by twenty-fold."""
+        assert ExposureRung("slow", 1, 0.0).ceiling_seconds == 70.0
+        assert ExposureRung("normal", 4, 0.0).ceiling_seconds == 84.0
 
     def test_bright_light_takes_the_cheapest_rung(self) -> None:
         """Seventy seconds on 1500 cd/m² buys nothing."""
@@ -148,6 +168,6 @@ class TestEscalationInASession:
 
 
 def test_a_custom_ladder_is_honoured() -> None:
-    one = ExposureRung(speed=None, average_samples=1, trustworthy_above=0.0, seconds=1)
+    one = ExposureRung(speed=None, average_samples=1, trustworthy_above=0.0)
 
     assert rung_for(0.0, (one,)) is one

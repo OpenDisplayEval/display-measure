@@ -32,6 +32,25 @@ __all__ = [
 ]
 
 
+# The serial timeout the CR driver applies, in seconds, per speed. A
+# read cannot be interrupted — the instrument has no abort command, and
+# a host that stops listening leaves it integrating regardless — so this
+# is not an estimate of how long a read takes. It is how long the
+# instrument is unreachable if the read finds no light.
+SPEED_CEILING = {"normal": 21.0, "slow": 70.0, "fast": 14.0, None: 21.0}
+
+# The longest any rung may wedge the instrument. Reached in true
+# darkness, which is exactly where the ladder climbs, so this is a
+# routine cost rather than a worst case.
+#
+# There is no recovery from an in-flight read: killing the host leaves
+# the instrument integrating, deaf to commands, for the remainder of its
+# ceiling. A ladder whose top rung costs 2240 s is one that can wedge a
+# bench for most of an hour with no way to take it back — and across a
+# 795-patch session's dark end, for most of a day.
+MAX_READ_SECONDS = 90.0
+
+
 @dataclass(frozen=True)
 class ExposureRung:
     """One exposure setting, and the luminance it can be trusted below.
@@ -44,12 +63,26 @@ class ExposureRung:
     speed: str | None
     average_samples: int
     trustworthy_above: float
-    seconds: float
 
     @property
     def label(self) -> str:
         speed = self.speed or "n/a"
         return f"{speed} x{self.average_samples}"
+
+    @property
+    def ceiling_seconds(self) -> float:
+        """How long this rung can hold the instrument, from the driver's
+        own formula rather than a guess about it."""
+        return SPEED_CEILING.get(self.speed, 21.0) * self.average_samples
+
+    def __post_init__(self) -> None:
+        if self.ceiling_seconds > MAX_READ_SECONDS:
+            raise ValueError(
+                f"rung {self.label} can hold the instrument for "
+                f"{self.ceiling_seconds:.0f}s, over the {MAX_READ_SECONDS:.0f}s "
+                "a read may cost. An in-flight read cannot be cancelled, so "
+                "this is time no operator can take back."
+            )
 
 
 # Cheapest first. The trust thresholds are this bench's CR-300 measured
@@ -59,11 +92,17 @@ class ExposureRung:
 # eventually, as nominal ranges per device — a session should not have
 # to rediscover where its instrument taps out on every run.
 DEFAULT_LADDER: tuple[ExposureRung, ...] = (
-    ExposureRung(speed="normal", average_samples=1, trustworthy_above=1.0, seconds=1),
-    ExposureRung(speed="normal", average_samples=8, trustworthy_above=0.1, seconds=6),
-    ExposureRung(speed="slow", average_samples=8, trustworthy_above=0.02, seconds=20),
-    ExposureRung(speed="slow", average_samples=32, trustworthy_above=0.0, seconds=90),
+    ExposureRung(speed="normal", average_samples=1, trustworthy_above=1.0),
+    ExposureRung(speed="normal", average_samples=4, trustworthy_above=0.05),
+    ExposureRung(speed="slow", average_samples=1, trustworthy_above=0.0),
 )
+
+# No averaging rung on `slow`, and that is a deliberate omission rather
+# than an oversight. Averaging reduces *random* noise by the square root
+# of the count and cannot move a systematic dark-current pedestal, so a
+# `slow x32` rung would multiply the wedge by 32 for a benefit nobody
+# has measured. The capped sweep that would settle it has not run. Add
+# the rung when there is a measurement saying it helps, not before.
 
 
 def instrument_floor(ladder: tuple[ExposureRung, ...] = DEFAULT_LADDER) -> float:
