@@ -12,9 +12,11 @@ import pytest
 from display_measure.exposure import (
     DEFAULT_LADDER,
     MAX_READ_SECONDS,
+    USEFUL_FLOOR,
     ExposureRung,
     instrument_floor,
     rung_for,
+    worth_resolving,
 )
 from display_measure.instrument import XYZReading
 
@@ -52,6 +54,29 @@ class TestTheLadder:
 
     def test_a_reading_near_black_takes_the_deepest(self) -> None:
         assert rung_for(0.000222) is DEFAULT_LADDER[-1]
+
+    def test_the_ladder_stops_at_the_useful_floor_not_the_instrument_s(
+        self,
+    ) -> None:
+        """These displays are measured for human viewers and cinematic
+        cameras, and both stop caring around 0.005 cd/m². Chasing below
+        an order of magnitude under that is what turned this into a
+        75-minute measurement nobody would run."""
+        assert instrument_floor() == USEFUL_FLOOR
+
+    def test_a_whole_climb_fits_in_a_couple_of_minutes(self) -> None:
+        """A session that spends longer than this on one patch is a
+        session nobody runs."""
+        total = sum(rung.ceiling_seconds for rung in DEFAULT_LADDER)
+
+        assert total < 180
+
+    def test_the_panel_black_is_below_what_anything_reads(self) -> None:
+        """0.000222 cd/m², measured by the CR-120. Under the useful
+        floor — so the colorimeter already covers the whole range that
+        has a consumer, at its default settings."""
+        assert not worth_resolving(0.000222)
+        assert worth_resolving(0.005)
 
     def test_nothing_read_yet_takes_the_cheapest(self) -> None:
         """The first read is what tells a session where it is;

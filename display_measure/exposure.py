@@ -39,15 +39,32 @@ __all__ = [
 # instrument is unreachable if the read finds no light.
 SPEED_CEILING = {"normal": 21.0, "slow": 70.0, "fast": 14.0, None: 21.0}
 
-# The longest any rung may wedge the instrument. Reached in true
-# darkness, which is exactly where the ladder climbs, so this is a
-# routine cost rather than a worst case.
+# The darkest luminance worth resolving, cd/m².
 #
-# There is no recovery from an in-flight read: killing the host leaves
-# the instrument integrating, deaf to commands, for the remainder of its
-# ceiling. A ladder whose top rung costs 2240 s is one that can wedge a
-# bench for most of an hour with no way to take it back — and across a
-# 795-patch session's dark end, for most of a day.
+# Not the darkest measurable — the darkest with a consumer. These
+# displays are measured for human viewers and cinematic cameras, and
+# both stop caring well above the physics:
+#
+#   HDR mastering / the PQ design floor    ~0.005 cd/m²
+#   a 17-stop camera under a 1500 nit peak ~0.011 cd/m²
+#   an eye adapted in a viewing room       ~0.001-0.005 cd/m²
+#
+# An order of magnitude under the content floor is generous. Below it a
+# reading answers no question anyone asked, and chasing it is what
+# turned a ladder into a 75-minute measurement nobody would ever run.
+#
+# The bench CR-120 reads this panel's black at 0.000222 — four times
+# under this floor at its default settings. The depth was never the
+# problem; the instrument choice was.
+USEFUL_FLOOR = 0.001
+
+# The longest any rung may hold the instrument. An in-flight read cannot
+# be cancelled — the instrument has no abort, and a host that stops
+# listening leaves it integrating regardless — so this is time no
+# operator can take back.
+#
+# Sized so a whole climb stays inside a couple of minutes: a session
+# that spends longer than that on one patch is a session nobody runs.
 MAX_READ_SECONDS = 90.0
 
 
@@ -94,8 +111,15 @@ class ExposureRung:
 DEFAULT_LADDER: tuple[ExposureRung, ...] = (
     ExposureRung(speed="normal", average_samples=1, trustworthy_above=1.0),
     ExposureRung(speed="normal", average_samples=4, trustworthy_above=0.05),
-    ExposureRung(speed="slow", average_samples=1, trustworthy_above=0.0),
+    ExposureRung(speed="slow", average_samples=1, trustworthy_above=USEFUL_FLOOR),
 )
+
+# Two rungs of climb, 175 s if a patch needs all of it, and the ladder
+# stops at the useful floor rather than at the instrument's. A reading
+# still under it after the last rung is not a number to chase with more
+# exposure — it is a patch this instrument cannot usefully resolve, and
+# the answer is the colorimeter (`--instrument hybrid`), not another
+# forty minutes of integration.
 
 # No averaging rung on `slow`, and that is a deliberate omission rather
 # than an oversight. Averaging reduces *random* noise by the square root
@@ -106,12 +130,18 @@ DEFAULT_LADDER: tuple[ExposureRung, ...] = (
 
 
 def instrument_floor(ladder: tuple[ExposureRung, ...] = DEFAULT_LADDER) -> float:
-    """The lowest luminance any rung claims to resolve.
+    """The lowest luminance this ladder resolves.
 
-    A reading below this is the instrument, whatever the exposure — the
-    number a session should refuse to present as the display's.
+    A reading under it is not the display's — the session has run out of
+    exposure worth spending, and the honest next step is a more
+    sensitive instrument rather than a longer integration.
     """
     return min(rung.trustworthy_above for rung in ladder)
+
+
+def worth_resolving(luminance: float) -> bool:
+    """Whether a reading is above the level anything downstream reads."""
+    return luminance > USEFUL_FLOOR
 
 
 def rung_for(
