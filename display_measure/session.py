@@ -30,7 +30,7 @@ import hashlib
 import logging
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -727,10 +727,17 @@ def _run_probes(
         probe_patch = Patch(f"probe_{rgb[0]}_{rgb[1]}_{rgb[2]}", rgb, role="probe")
         return luminance(_read(instrument, probe_patch, attempts=read_attempts))
 
+    # A probe's patches are not artifact rows, and an instrument that
+    # files a source per row would file one for each of them — leaving
+    # the routing record longer than the rows it parallels, which the
+    # artifact refuses. Routing still applies to the reads themselves.
+    off_record = getattr(instrument, "off_the_record", None)
+
     results = []
     for probe in suite.probes:
         emit(ProbeStarted(probe.id, probe.max_patches))
-        result = replace(probe, floor=floor).run(read)
+        with off_record() if off_record else nullcontext():
+            result = replace(probe, floor=floor).run(read)
         emit(ProbeCompleted(probe.id, result.patch_count, dict(result.findings)))
         results.append(result)
     return tuple(results)

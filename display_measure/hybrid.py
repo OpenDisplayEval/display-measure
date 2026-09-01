@@ -53,6 +53,8 @@ pending instrument-floor measurements (§road:instrument-floors).
 
 import logging
 import math
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -292,6 +294,11 @@ class HybridInstrument:
         self._pairs: list[tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]] = []
         self._matrix: npt.NDArray[np.float64] | None = None
         self._sources: list[str] = []
+        # `sources` parallels the artifact's driven rows, one entry per
+        # patch. A probe reads patches that are not rows — its readings
+        # are its own record — so those reads route as any other but are
+        # not filed against a row that does not exist.
+        self._recording = True
         # The brightest measured spectrum seen per stimulus family, with
         # the luminance it was read at — what a colorimeter-routed row of
         # that family reconstructs from.
@@ -303,6 +310,22 @@ class HybridInstrument:
         return (
             f"{self._spectroradiometer.serial_number}+{self._colorimeter.serial_number}"
         )
+
+    @contextmanager
+    def off_the_record(self) -> Iterator[None]:
+        """Route reads as usual, but file none of them against a row.
+
+        A probe drives patches the protocol does not carry, so there is
+        no row for its readings to be attributed to. Routing still
+        applies — a hybrid session searching the dark end wants the
+        colorimeter there as much as anywhere — and what the probe read
+        is recorded in its own result.
+        """
+        self._recording = False
+        try:
+            yield
+        finally:
+            self._recording = True
 
     def derivation_patches(self) -> tuple[str, ...]:
         return self._derivation
@@ -328,7 +351,8 @@ class HybridInstrument:
         level = float(corrected[1])
         if level >= self._threshold:
             return self._from_spectroradiometer(patch)
-        self._sources.append(SOURCE_COLORIMETER)
+        if self._recording:
+            self._sources.append(SOURCE_COLORIMETER)
         log.info(
             "instrument route: %s -> disciplined colorimeter (%.4f cd/m², "
             "under the %.4f threshold)",
@@ -388,7 +412,8 @@ class HybridInstrument:
             return None
 
     def _from_spectroradiometer(self, patch: str, note: str = "") -> InstrumentReading:
-        self._sources.append(SOURCE_SPECTRORADIOMETER)
+        if self._recording:
+            self._sources.append(SOURCE_SPECTRORADIOMETER)
         log.info("instrument route: %s -> spectroradiometer%s", patch, note)
         reading = self._spectroradiometer.measure()
         self._remember(patch, reading)

@@ -7,16 +7,19 @@ code 6, green and blue at 8, and nothing below emits at all.
 """
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 
 from display_measure.probes import FIRST_LIGHT, FirstLight
-from display_measure.protocol import FULL_DRIVE
+from display_measure.protocol import FULL_DRIVE, REPORT_SUITE
 
 # The bench panel, as the toe map measured it: nothing below code 6, red
 # first at 6, green and blue at 8. Luminance rises steeply above that.
 BENCH_THRESHOLDS = {"red": 6, "green": 8, "blue": 8}
 BENCH_BLACK = 0.000122
+
+FIXED_TIME = datetime(2026, 8, 10, 12, 0, 0, tzinfo=UTC)
 
 
 def probe(floor=BENCH_BLACK):
@@ -143,3 +146,45 @@ def test_a_probe_needs_black_measured_first() -> None:
     compare against is guessing."""
     with pytest.raises(ValueError, match="floor"):
         FirstLight(floor=None).run(bench_display())
+
+
+class TestProbeReadsAreNotArtifactRows:
+    """A probe drives patches the protocol does not carry.
+
+    A hybrid session files one routing source per driven row, so a probe
+    read filed the same way leaves the routing record longer than the
+    rows it parallels — and the artifact refuses to be written, correctly
+    and unhelpfully. Routing still applies to the reads themselves: the
+    colorimeter is the right instrument for a dark-end search.
+    """
+
+    def test_a_disciplined_instrument_can_read_off_the_record(self) -> None:
+        from display_measure.hybrid import HybridInstrument
+
+        assert hasattr(HybridInstrument, "off_the_record")
+
+    def test_the_session_routes_probe_reads_without_filing_them(self, tmp_path) -> None:
+        """The end-to-end guard: a hybrid report session writes an
+        artifact whose routing record still parallels its rows."""
+        import yaml
+        from specio.serialization.csmf import load_csmf_file
+
+        from display_measure.artifact import carried_projection
+        from display_measure.session import doubles_session
+
+        out = tmp_path / "hybrid.csmf"
+        doubles_session(
+            out,
+            clock=lambda: FIXED_TIME,
+            settle_seconds=0.0,
+            suite=REPORT_SUITE,
+            hybrid=True,
+        )
+        _, text = carried_projection(load_csmf_file(out).ancillary)
+        document = yaml.safe_load(text)
+
+        driven = document["protocol"]["presentation_order"]
+        sources = document["instrument_routing"]["sources"]
+        assert len(sources) == len(driven)
+        # And the probe still ran, off the record.
+        assert document["protocol"]["probes"]
