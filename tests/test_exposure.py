@@ -16,6 +16,7 @@ from display_measure.exposure import (
     instrument_floor,
     rung_for,
 )
+from display_measure.instrument import XYZReading
 
 
 class TestTheLadder:
@@ -86,10 +87,8 @@ class Stepped:
         deep = self.measurement_speed == "slow"
         return 0.0001 if deep else 0.02 / self.average_samples
 
-    def measure(self):
+    def measure(self) -> XYZReading:
         import numpy as np
-
-        from display_measure.instrument import XYZReading
 
         self.reads += 1
         seen = max(self.true_luminance, self._floor)
@@ -102,7 +101,7 @@ class TestEscalationInASession:
         from display_measure.session import _read_at_depth
 
         instrument = Stepped(true_luminance=0.000222)
-        events: list = []
+        events: list[object] = []
 
         reading = _read_at_depth(
             instrument,
@@ -146,10 +145,8 @@ class TestEscalationInASession:
             def __init__(self) -> None:
                 self.reads = 0
 
-            def measure(self):
+            def measure(self) -> XYZReading:
                 import numpy as np
-
-                from display_measure.instrument import XYZReading
 
                 self.reads += 1
                 return XYZReading(XYZ=np.array([1e-9, 1e-9, 1e-9]))
