@@ -104,6 +104,7 @@ from display_measure.processor import (
     WireFormat,
     audit_ambient,
     audit_contract,
+    audit_input_gamut,
     audit_output_level,
     audit_output_scaling,
     audit_wire_format,
@@ -1158,6 +1159,10 @@ def _audit_processor(
     reading = audit_contract(declared, state_from_tessera(global_colour))
     audit_output_scaling(global_colour)
     audit_wire_format(WireFormat.for_encoding(encoding), processor.input_metadata())
+    # Last, and it is the one that decides whether the codes mean what
+    # the protocol says they mean: the active port has to pass colour
+    # through, or the session measures a transform and calls it a panel.
+    audit_input_gamut(processor.input_gamut(), processor.panel_gamut())
     return reading
 
 
