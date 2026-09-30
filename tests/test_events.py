@@ -99,7 +99,7 @@ def test_every_patch_reports_its_completion_with_a_reading_and_a_duration(
 def test_each_patch_walks_drive_then_settle_then_read(
     display_stream: tuple[SessionEvent, ...],
 ) -> None:
-    """The three per-patch stages §spec:sessions names, in order and
+    """The three per-patch stages a session walks, in order and
     announced before the session sits still for them."""
     steps = [
         event
@@ -138,7 +138,7 @@ def test_every_gate_the_session_holds_reports_an_outcome(
         Gate.AMBIENT: GateVerdict.PASS,
         Gate.OUTPUT_LEVEL: GateVerdict.PASS,
         # The only gate that resolves after the protocol: a ramp is not a
-        # ramp until it is measured (§road:session-consistency).
+        # ramp until it is measured.
         Gate.SELF_CONSISTENCY: GateVerdict.PASS,
     }
 
@@ -176,7 +176,7 @@ def test_a_refusal_names_the_gate_and_ends_the_session(
 ) -> None:
     """A session-end event carries the message; the gate event says
     which check produced it, which is what sends the operator to the
-    right place at the rig (§spec:web-ui)."""
+    right place at the rig."""
     stream: list[SessionEvent] = []
     with pytest.raises(ContractViolation):
         doubles_session(
@@ -259,7 +259,7 @@ def test_the_session_log_is_the_event_stream_rendered(
     display_events: tuple[tuple[SessionEvent, ...], Path],
     display_artifact: Path,
 ) -> None:
-    """§road:cli-log-from-events: not a parallel path.
+    """The CLI log renders the event stream: not a parallel path.
 
     Two independent runs — one with the default sink, which logs, and
     one with a collecting sink, which does not. Replaying the collected
@@ -275,7 +275,7 @@ def test_the_session_log_is_the_event_stream_rendered(
 def test_the_log_still_narrates_every_stage(
     display_stream: tuple[SessionEvent, ...],
 ) -> None:
-    """The stages §spec:sessions names, still in the log now that the
+    """The stages a session walks, still in the log now that the
     log renders events rather than writing its own lines."""
     rendered = render(display_stream)
     for marker in (

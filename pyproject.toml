@@ -32,14 +32,13 @@ classifiers = [
     "Topic :: System :: Hardware :: Hardware Drivers",
 ]
 dependencies = [
-    # Patch drive: DeckLink output surface plus its hardware-free mock
-    # (§spec:sessions). Git tag pin — bmd-signal-generator is not on
-    # PyPI.
+    # Patch drive: DeckLink output surface plus its hardware-free mock.
+    # Git tag pin — bmd-signal-generator is not on PyPI.
     "bmd-signal-generator",
-    # Instrument read (§spec:sessions). The 0.4.2a0 pre-release is
-    # the first PyPI release compatible with bmd-signal-generator's
-    # numpy>=2.3.1 floor (0.4.1.post0 pins numpy<2). Pinned exactly:
-    # colour-specio's measure() surface is the driver contract.
+    # Instrument read. The 0.4.2a0 pre-release is the first PyPI release
+    # compatible with bmd-signal-generator's numpy>=2.3.1 floor
+    # (0.4.1.post0 pins numpy<2). Pinned exactly: colour-specio's
+    # measure() surface is the driver contract.
     "colour-specio==0.4.2a0",
     "numpy>=2.3.1",
     # The wire encoding between a patch and the device (§spec:measure-

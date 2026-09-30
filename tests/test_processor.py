@@ -26,7 +26,7 @@ from display_measure.processor import (
 )
 from display_measure.wire import RGB12, V210
 
-# The bench contract the show manifest declares (§spec:signal-contract).
+# The bench contract the show manifest declares.
 DECLARED = ProcessorStateSnapshot(
     eotf_type="GAMMA",
     gamma_value=2.35,
@@ -166,7 +166,7 @@ signal_contract:
 
 
 def test_declared_contract_comes_from_the_show_manifest(tmp_path: Path) -> None:
-    """The manifest is the human-authored source of truth (§spec:provenance).
+    """The manifest is the human-authored source of truth.
 
     A contract retyped into a CLI flag is a second source that can drift
     from the one the config was generated against.

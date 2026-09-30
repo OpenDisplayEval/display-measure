@@ -1,4 +1,4 @@
-"""Matching instrument exposure to the light there is (§spec:sessions).
+"""Matching instrument exposure to the light there is.
 
 An instrument left at its defaults reads its own floor when the display
 is darker than that floor. The bench CR-300 read this panel's black at

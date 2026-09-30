@@ -1,4 +1,4 @@
-"""Session self-consistency (§road:session-consistency).
+"""Session self-consistency.
 
 The contract audit catches a wrong processor. These catch a wrong
 *session* — a measurement that contradicts itself, which no amount of

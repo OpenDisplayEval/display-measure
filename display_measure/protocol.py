@@ -1,4 +1,4 @@
-"""The characterize patch protocol (§spec:patch-protocol, §spec:sessions).
+"""The characterize patch protocol (§spec:patch-protocol).
 
 The protocol is the fixed, versioned, device-referred patch set a
 characterize session drives: anchors (black, full-drive R/G/B/W),
@@ -12,7 +12,7 @@ signal-level response. The shuffle is a sha256 sort keyed by the
 session seed — deterministic across Python and library versions, so
 the determinism seam (`display_measure.artifact`) never depends on an
 RNG stream's stability. Black is pinned ahead of the shuffle: the
-ambient gate consumes the opening black reading (§spec:sessions). A
+ambient gate consumes the opening black reading. A
 session may pin more patches — a disciplined-colorimeter session pins
 the R/G/B anchors it derives its correction from — without touching the
 patch set or its codes.
@@ -79,7 +79,7 @@ RANDOM_PATCHES = 100
 # Patches driven ahead of the shuffle, in this order. Black opens every
 # session — the ambient gate consumes that reading — and white follows
 # it, so the session's two gating readings both arrive before the
-# shuffle (§spec:sessions).
+# shuffle.
 #
 # White is pinned *after* black, never before: black is the session's
 # most delicate reading, and driving full white into it would leave the
@@ -108,7 +108,7 @@ def _half_octave_ladder(floor: int, ceiling: int) -> tuple[int, ...]:
 
     Half-octave spacing in code space gives near-constant relative
     luminance steps through a power-law decode — dense where the shadow
-    response needs it (§spec:signal-contract), sparse where it does not.
+    response needs it, sparse where it does not.
     Both factors are exact on the power-of-two floor, so every rung is
     an integer code.
     """
@@ -497,8 +497,8 @@ class MeasurementSuite:
     # Until consumers match on blocks, an artifact still carries one
     # string and ocio-display-gen still matches it. A suite whose blocks
     # are exactly what a released protocol named keeps that name here so
-    # artifacts stay comparable across the change (§road:ocio-reads-csmf
-    # retires this field). No new suite should claim one.
+    # artifacts stay comparable across the change, until consumers read
+    # blocks and this field retires. No new suite should claim one.
     legacy_name: str | None = None
 
     @property
@@ -644,10 +644,9 @@ def presentation_order(
 
     Black is pinned by default — the ambient gate consumes the opening
     reading. A session whose instrument must be calibrated against
-    patches the protocol already carries pins those too
-    (§spec:sessions); the patch set, its codes, and the
-    shuffle rule over the tail are unchanged, and the artifact records
-    the resulting names as the unshuffle key (§spec:artifact-chain).
+    patches the protocol already carries pins those too; the patch set,
+    its codes, and the shuffle rule over the tail are unchanged, and the
+    artifact records the resulting names as the unshuffle key.
     Sorting patches back to protocol order reconstructs the analysis
     view.
 

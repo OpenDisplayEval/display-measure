@@ -2,7 +2,7 @@
 
 A session reports its lifecycle here and nowhere else. The CLI's
 session log is a consumer (:mod:`display_measure.session_log`); so is
-color-wrangler's operator UI, in another repository. That is the whole
+the umbrella project's operator UI, in another repository. That is the whole
 point of the seam — the core stays presentation-agnostic and a
 hardware session stays scriptable headless.
 
@@ -57,7 +57,7 @@ __all__ = [
 
 
 class SessionMode(StrEnum):
-    """What a session drives and hands off (§spec:sessions).
+    """What a session drives and hands off.
 
     `verify` registers here when its workstream lands; the modes share
     one core and differ only in that.
@@ -82,7 +82,7 @@ class Gate(StrEnum):
     DERIVATION_FITNESS = "derivation-fitness"
     # The only gate that resolves after the protocol rather than before
     # it: a ramp is not a ramp until it is measured. It refuses the
-    # artifact, not the session's time (§road:session-consistency).
+    # artifact, not the session's time.
     SELF_CONSISTENCY = "self-consistency"
 
 
@@ -186,8 +186,7 @@ class PatchSettling(SessionEvent):
 
     A settle and an instrument read are the two places a session sits
     still for a while. Announcing them as they start is what makes a
-    run auditable while it happens rather than only after it ends
-    (§spec:sessions).
+    run auditable while it happens rather than only after it ends.
     """
 
     index: int
@@ -213,7 +212,7 @@ class PatchCompleted(SessionEvent):
 
 @dataclass(frozen=True)
 class HandoffCompleted(SessionEvent):
-    """The immutable artifact is on disk (§spec:artifact-chain).
+    """The immutable artifact is on disk.
 
     The hash is the artifact's identity: promotion records it, so a
     consumer showing the operator what was produced shows this.
@@ -275,7 +274,7 @@ class ExposureRaised(SessionEvent):
 class UnreadablePatch(RuntimeError):
     """Every attempt at one patch failed, so the artifact cannot be whole.
 
-    The artifact is all-or-nothing (§spec:artifact-chain): a session
+    The artifact is all-or-nothing: a session
     with a hole in it is not a shorter session, it is one whose ramps
     have a missing rung nothing downstream can see.
     """
@@ -286,7 +285,7 @@ class SessionCancelled(Exception):
 
     An exception rather than a return value: it unwinds past the
     handoff, which is the guarantee that matters. A measurements
-    artifact is immutable and complete (§spec:artifact-chain), so a
+    artifact is immutable and complete, so a
     partial one does not exist — a cancelled session's output is
     nothing at all.
     """

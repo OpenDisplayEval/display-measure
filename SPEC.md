@@ -5,30 +5,22 @@ values at a display through its real signal chain, read the emitted
 light, and write an immutable measurement file.
 
 System requirements, the four-layer architecture and the cross-repo
-roadmap live in
-[color-wrangler](https://github.com/Fuse-Technical-Group/color-wrangler),
-which this repository references as upstream context. A slug in
-backticks — `§spec:session-ownership`, `§spec:signal-contract`,
-`§spec:artifact-chain` — resolves in that repository's SPEC.md, not
-this one; so does any slug carried in this repository's source that no
-heading here defines. This document covers only what this layer owns.
+roadmap live in the umbrella project, which this repository references
+as upstream context. This document covers only what this layer owns.
 
 Where a heading here would otherwise collide with an upstream one, it
-takes a distinct slug. Upstream owns `§spec:sessions` and says more
-about a session than this layer needs to, so the local section is
-§spec:measure-sessions. The ported source's own `§spec:sessions`
-citations were written against upstream's section and still resolve
-there, which is what they meant. Two documents owning one anchor with
-drifting content is not reuse.
+takes a distinct slug. Upstream says more about a session than this
+layer needs to, so the local section is §spec:measure-sessions. Two
+documents owning one anchor with drifting content is not reuse.
 
 ## Scope §spec:scope
 
 *Status: in progress*
 
-One repository opens a serial port or a DeckLink, and it is this one
-(`§spec:session-ownership`). It drives patches through the show chain,
+One repository opens a serial port or a DeckLink, and it is this one.
+It drives patches through the show chain,
 reads the instruments, holds the session gates, and emits the
-measurement file. color-wrangler orchestrates and presents;
+measurement file. The umbrella project orchestrates and presents;
 ocio-display-gen generates; display-report reports. None of them
 imports a device driver.
 
@@ -40,7 +32,7 @@ device directly, because only one repository knows how.
 
 Not owned here: OCIO semantics and config generation (ocio-display-gen),
 ΔE analysis and reports (display-report), the show manifest's schema
-and the promotion decision (color-wrangler). Device layers are
+and the promotion decision (the umbrella project). Device layers are
 referenced, never re-specified: bmd-signal-gen owns patch rendering and
 wire-format correctness, pydecklink owns device access, colour-specio
 owns instrument communication; its `measure()` surface is the driver
@@ -50,10 +42,9 @@ colour-specio is a fork of `colour-science/colour-specio`, org-owned
 and tracking upstream, carrying device support upstream does not have
 yet. Upstream stays the venue for fixes and the fork's delta stays
 small enough to send there; the fork is the pin until a fix merges.
-The seam file's format is colour-specio's too
-(`§spec:measurement-seam`), so a gap in its measurement file reader is
-a gap in this layer's output — fixed upstream, not worked around
-here.
+The seam file's format is colour-specio's too, so a gap in its
+measurement file reader is a gap in this layer's output — fixed
+upstream, not worked around here.
 
 ## Measurement sessions §spec:measure-sessions
 
@@ -83,8 +74,7 @@ decision informed by display-report's analysis.
 parameter, defaulting to the bench's 12-bit RGB identity. The session
 encodes through the shared packer and implements no conversion; the
 format-confirmation gate holds the processor to the declaration, and
-the artifact records it. Why the wire is its own layer:
-`§spec:architecture`.
+the artifact records it.
 
 **Instruments have doubles.** The default double is a deterministic
 plausible display — an additive per-channel model that synthesizes the
@@ -120,7 +110,7 @@ session refuses before it measures. Each gate names what it read, what
 it expected, and why it stopped.
 
 - **Contract audit** — snapshot the processor read-only and diff every
-  field the manifest declares (`§spec:signal-contract`). A session
+  field the manifest declares. A session
   shall refuse on divergence, and shall refuse on a processing feature
   the manifest does not state: silence is how a rig's state goes
   unchecked.
@@ -166,8 +156,8 @@ troubleshooting.
 The session core reports its lifecycle as one stream of structured
 events and narrates nowhere else. `display_measure.events` defines
 them; `display_measure.session_log` renders them as the session log,
-and color-wrangler's operator UI renders the same stream from another
-repository (`§spec:web-ui`). The log is a consumer, not a second
+and the umbrella project's operator UI renders the same stream from
+another repository. The log is a consumer, not a second
 reporting path.
 
 A session emits session start (mode, protocol name, patch count),
@@ -194,10 +184,10 @@ instrument and patch level — a constant would mislead.
 
 **Cancellation is asked between patch steps and nowhere else.** A
 session stopped mid-patch would leave a driven frame with no reading
-behind it, and the measurements artifact is immutable and complete
-(`§spec:artifact-chain`), so a partial one does not exist: the output
-is all or nothing. A cancelled session stops playback, writes no
-artifact, and ends the stream cancelled. Ctrl-C is the CLI's cancel
+behind it, and the measurements artifact is immutable and complete,
+so a partial one does not exist: the output is all or nothing. A
+cancelled session stops playback, writes no artifact, and ends the
+stream cancelled. Ctrl-C is the CLI's cancel
 source — the first interrupt raises the flag, the second aborts the
 process, because an instrument read that never returns needs an
 escape.
@@ -330,7 +320,7 @@ varies per session and the artifact records it in full.
 *Status: complete*
 
 The session's output is one file: machine-written, immutable, never
-hand-edited (`§spec:artifact-chain`). It carries the measured
+hand-edited. It carries the measured
 primaries and white point, black level and peak luminance in absolute
 cd/m², per-channel response, ambient floor, instrument identity and
 firmware, the processor-state snapshot, the wire encoding, the protocol
@@ -374,10 +364,10 @@ measurement blocks and versions, which is what a consumer requires; the
 string survives only because ocio-display-gen matches it today and
 every artifact already promoted carries it. The `verify` composition —
 the blocks that protocol drove — carries it forward as a legacy name
-until `§road:ocio-reads-csmf` lands. No new composition claims one
+until ocio-display-gen reads CSMF. No new composition claims one
 (MEASUREMENT.md).
 
-**The artifact is the seam file** (`§spec:measurement-seam`). It is
+**The artifact is the seam file.** It is
 CSMF, carrying the spectra behind each reading and its per-row
 spectral provenance, with everything above — contract, panel state,
 protocol name, instrument identity, hashes — in the provenance block
@@ -398,7 +388,7 @@ each row's spectrum as a digest rather than as samples: an
 instrument's grid is hundreds of bins per row, and restating every one
 would multiply the file's size for data it already holds.
 
-**Spectral provenance is per row** (`§spec:spectral-retention`). Each
+**Spectral provenance is per row.** Each
 row records whether its spectrum was measured, reconstructed or
 absent, so an analysis needing a real spectrum refuses the rows that
 lack one instead of treating a scaled estimate as a measurement. A

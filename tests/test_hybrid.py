@@ -1,4 +1,4 @@
-"""Disciplined-colorimeter tests (§spec:sessions).
+"""Disciplined-colorimeter tests.
 
 The display double and the mismatched colorimeter differ by exactly one
 3x3, so a correct derivation recovers the spectroradiometer's readings
@@ -284,7 +284,7 @@ class TestDerivationAudit:
     def test_the_refusal_names_the_span_the_correction_was_derived_across(
         self,
     ) -> None:
-        """§road:instrument-floors asks the artifact to state the span; a
+        """The artifact states the span a correction was derived across; a
         refusal is the moment it matters most."""
         reference = self.RUNGS
         colorimeter = reference / 100.0
@@ -299,7 +299,7 @@ class TestReconstruction:
     """Colorimeter-routed rows get a spectrum, and it is named as one.
 
     The scaling is legitimate to the degree an emitter's spectral shape
-    is drive-invariant (§spec:spectral-retention), so what the row has to
+    is drive-invariant, so what the row has to
     carry is the span it was scaled across.
     """
 

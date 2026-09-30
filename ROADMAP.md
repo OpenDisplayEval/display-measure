@@ -1,16 +1,13 @@
 # display-measure — Roadmap
 
 This layer's roadmap. Cross-repo coordination and the pipeline-wide
-sequencing live in
-[color-wrangler](https://github.com/Fuse-Technical-Group/color-wrangler);
-workstreams there are addressed by slug in backticks and resolve in
-that repository's ROADMAP.md.
+sequencing live in the umbrella project.
 
 ## Extraction §road:extraction
 
-The session core arrives here from color-wrangler and takes over as
-the one tool that touches instruments and signal hardware
-(`§spec:session-ownership`). The scaffold lands first, the hardware
+The session core arrives here from the umbrella project and takes over
+as the one tool that touches instruments and signal hardware. The
+scaffold lands first, the hardware
 path follows, and only then does the old path retire — so no window
 exists in which neither repository can measure a display.
 
@@ -18,7 +15,7 @@ exists in which neither repository can measure a display.
 
 Carry the hardware session and its gates across, and re-run a full
 bench characterize from display-measure. §spec:measure-sessions,
-§spec:session-gates. Upstream: `§road:move-bench-path`.
+§spec:session-gates.
 
 **Verify:** on the bench, `display-measure characterize --processor
 <host> --manifest <path>` refuses a contract violation and completes a
@@ -27,9 +24,8 @@ without conversion.
 
 ## Session gates §road:session-gates
 
-Every gate `§spec:signal-contract` names refuses, whichever tool
-invoked the session. What is left is the gates the walking skeleton
-runs without.
+Every signal-contract gate refuses, whichever tool invoked the session.
+What is left is the gates the walking skeleton runs without.
 
 ### Standalone snapshot command §road:processor-state-snapshot
 
@@ -57,7 +53,7 @@ non-zero naming the field, before any patch is driven.
 ## Self-describing measurement seam §road:measurement-seam
 
 The measure and validate layers meet at one file that states what
-produced it. Upstream: `§road:measurement-seam`. CSMF replaced the
+produced it. CSMF replaced the
 YAML artifact, so this section retired a format as well as adding one:
 `display-measure characterize` writes one `.csmf` carrying the spectra
 and their per-row provenance, with everything CSMF does not model in
@@ -65,8 +61,8 @@ the provenance block its ancillary field holds.
 
 **Downstream consumers read the old format.** ocio-display-gen loads
 the YAML artifact this layer no longer writes, so the two are out of
-step until `§road:ocio-reads-csmf` lands there; the same file is what
-`§road:read-seam-file` unblocks in display-report.
+step until ocio-display-gen reads CSMF; display-report waits on the
+same file.
 
 ### Revert the colour-specio pin §road:specio-pin-revert
 

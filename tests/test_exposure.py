@@ -1,4 +1,4 @@
-"""Matching exposure to the light there is (§spec:sessions).
+"""Matching exposure to the light there is.
 
 The bench CR-300 read this panel's black at 0.0161 cd/m² against its own
 blocked-aperture zero of ~0.0149, while the CR-120 read 0.000222 of the

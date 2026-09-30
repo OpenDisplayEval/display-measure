@@ -1,7 +1,7 @@
-"""Gated instrument sessions for display characterization (§spec:sessions).
+"""Gated instrument sessions for display characterization.
 
 The session event stream is re-exported here because it is the package's
-public contract: a consumer — color-wrangler's operator UI, an RPC
+public contract: a consumer — the umbrella project's operator UI, an RPC
 surface later — imports the lifecycle from `display_measure` and never
 reaches into a private module for it (§spec:session-events).
 

@@ -63,7 +63,7 @@ leaving no artifact. `display-measure characterize` wires Ctrl-C to it
 
 | Layer | Repo | Role |
 | --- | --- | --- |
-| Orchestrate/present | [color-wrangler](https://github.com/Fuse-Technical-Group/color-wrangler) | Show-side orchestration, operator UI, umbrella governance |
+| Orchestrate/present | The umbrella project | Show-side orchestration, operator UI, umbrella governance |
 | Measure | display-measure (here) | Gated instrument sessions → measurement files |
 | Generate | [ocio-display-gen](https://github.com/Fuse-Technical-Group/ocio-display-gen) | Manifest + measurements → OCIO config + predictions |
 | Validate | [display-report](https://github.com/OpenDisplayEval/display-report) | Independent analysis and reports from a measurement file |
@@ -73,7 +73,7 @@ This layer owns the measurement file and nothing downstream of it
 (§spec:scope, §spec:measurements-artifact).
 
 System requirements, architecture and the cross-component roadmap live
-in color-wrangler, which this repository references as upstream
+in the umbrella project, which this repository references as upstream
 context.
 
 ## License

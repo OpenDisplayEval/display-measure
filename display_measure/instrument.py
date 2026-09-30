@@ -1,4 +1,4 @@
-"""The instrument seam: what a session reads (§spec:architecture).
+"""The instrument seam: what a session reads.
 
 Sessions consume instruments structurally: colour-specio's
 ``SpecRadiometer`` and ``Colorimeter`` satisfy the protocols below
@@ -9,7 +9,7 @@ synthesized or corrected measurement returns — the one shape every
 producer here needs, so none of them roll their own.
 
 The seam is wider than tristimulus: a reading carries the spectrum
-behind it, or says it has none (§spec:spectral-retention). That widening
+behind it, or says it has none. That widening
 is an accessor (`spectrum`) rather than a member of `InstrumentReading`,
 because a colorimeter reading legitimately has no spectrum and could not
 then satisfy the protocol — the same reason `identity` reads firmware
@@ -107,7 +107,7 @@ def luminance(measurement: InstrumentReading) -> float:
 
 
 def spectrum(measurement: InstrumentReading) -> Spectrum:
-    """The spectral distribution behind the reading (§spec:spectral-retention).
+    """The spectral distribution behind the reading.
 
     Returns `ABSENT_SPECTRUM` for a reading that carries none — a
     colorimeter's, or a double that models tristimulus only. Absent is a
