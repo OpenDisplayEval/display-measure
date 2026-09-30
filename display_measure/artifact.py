@@ -1,4 +1,4 @@
-"""The measurements artifact: machine-written, immutable (§spec:artifact-chain).
+"""The measurements artifact: machine-written, immutable.
 
 Every required field of the artifact contract is carried here: measured
 native primaries and white point (CIE xy), black level and peak
@@ -10,23 +10,23 @@ absent.
 
 The seam file
 -------------
-The artifact is written as CSMF, colour-specio's measurement file
-(§spec:measurement-seam). CSMF carries the rows — tristimulus, and the
-spectrum behind each one — and everything it does not model rides in
-the provenance block its reserved `ancillary` field holds: the declared
-contract, the attested panel state, the protocol name and driven order,
-the instrument identity, the processor snapshot, the wire encoding and
+The artifact is written as CSMF, colour-specio's measurement file.
+CSMF carries the rows — tristimulus, and the spectrum behind each
+one — and everything it does not model rides in the provenance block
+its reserved `ancillary` field holds: the declared contract, the
+attested panel state, the protocol name and driven order, the
+instrument identity, the processor snapshot, the wire encoding and
 the correction matrix. One file, because a pipeline with two
 measurements files of record has none. Existing CSMF readers open it
 and ignore the field.
 
 Determinism seam
 ----------------
-§spec:artifact-chain requires timestamps in the artifact and also makes
-generated artifacts byte-deterministic so hashing and reproducibility
-enforce each other. The two reconcile through injection: the session
-takes a clock as input, so fixed inputs produce identical bytes — the
-determinism claim is "same inputs, same bytes", not "no timestamps".
+The artifact carries timestamps, and generated artifacts are also
+byte-deterministic so hashing and reproducibility enforce each other.
+The two reconcile through injection: the session takes a clock as
+input, so fixed inputs produce identical bytes — the determinism
+claim is "same inputs, same bytes", not "no timestamps".
 The CLI defaults to the real clock; tests and reproduction runs inject
 a fixed one. The default instrument double is deterministic by
 construction (see `display_measure.plausible_display`); only the explicitly
@@ -57,7 +57,7 @@ from pathlib import Path
 # implied the bench's 12-bit RGB link.
 SCHEMA = "color-wrangler/measurements/2"
 
-# The seam file is CSMF (§spec:measurement-seam), and colour-specio's
+# The seam file is CSMF, and colour-specio's
 # loader opens no other suffix.
 SEAM_SUFFIX = ".csmf"
 
@@ -83,7 +83,7 @@ _SAMPLE_DIGITS = 9
 _WAVELENGTH_DECIMALS = 3
 
 
-# How a row got its spectrum (§spec:spectral-retention). Per row, not per
+# How a row got its spectrum. Per row, not per
 # file: a disciplined session reads its dark end with a colorimeter, and a
 # colorimeter has no spectrum at all. An analysis that needs a real
 # spectrum can then refuse the rows that lack one rather than treating a
@@ -101,7 +101,7 @@ class Spectrum:
     Judgment-grade analysis is spectral — noise floors, metamerism,
     observer variation, camera match — and a tristimulus triple answers
     none of it, so the spectrum is retained rather than discarded at the
-    session boundary (§spec:spectral-retention).
+    session boundary.
 
     `values` are absolute spectral radiance at `wavelengths` (nm), the
     units colour-specio's instruments report. `derived_across` is the
@@ -177,7 +177,7 @@ class InstrumentIdentity:
 
 
 # Processor features split by what they do to a characterization, not by
-# how the vendor markets them (§spec:signal-contract).
+# how the vendor markets them.
 #
 # Content-independent processing is a static per-pixel transfer: the same
 # code produces the same light every frame. That is part of the display,
@@ -199,7 +199,7 @@ PROCESSING_FEATURES = CONTENT_INDEPENDENT_FEATURES + CONTENT_DEPENDENT_FEATURES
 
 # Panel-resident state the operator attests, because no leaf of the
 # processor's HTTP API reports it and every one of these moves the
-# measurement (§spec:signal-contract).
+# measurement.
 #
 # Measured on the bench 2026-08-29: switching `selected_calibration` took
 # white from 1035 to 1476 cd/m² and moved it from 0.0075 to 0.0040 du'v'
@@ -246,7 +246,7 @@ def _renderable(value: str, field: str) -> str:
 
 @dataclass(frozen=True)
 class ProcessorStateSnapshot:
-    """Processor state recorded with the measurements (§spec:signal-contract).
+    """Processor state recorded with the measurements.
 
     `gamma_value` is present exactly when `eotf_type` is ``"GAMMA"``.
     `processing_enabled` names the processing features that are on, which
@@ -302,8 +302,8 @@ class ProcessorStateSnapshot:
         return dict(self.panel_state)
 
 
-# The recommended SDR lockdown the walking skeleton declares
-# (§spec:signal-contract), and what the doubles declare compliance with.
+# The recommended SDR lockdown the walking skeleton declares, and what
+# the doubles declare compliance with.
 # A real rig states its own contract in the show manifest; this constant
 # only has to be a defensible default, and the defensible default is the
 # panel's own linearization on and its frame-adaptive processing off.
@@ -384,7 +384,7 @@ class ResponsePoint:
 
 @dataclass(frozen=True)
 class PerChannelResponse:
-    """Shadow-dense single-channel ramp readings (§spec:sessions).
+    """Shadow-dense single-channel ramp readings.
 
     Rows are protocol-ordered (ascending code) whatever the shuffled
     presentation drove; the unshuffle key preserves the driven order.
@@ -397,7 +397,7 @@ class PerChannelResponse:
 
 @dataclass(frozen=True)
 class AdditivityTriad:
-    """Full-drive two-channel sums (Y/C/M), absolute XYZ (§spec:sessions)."""
+    """Full-drive two-channel sums (Y/C/M), absolute XYZ."""
 
     yellow_xyz: tuple[float, float, float]
     cyan_xyz: tuple[float, float, float]
@@ -412,7 +412,7 @@ SOURCES = (SOURCE_SPECTRORADIOMETER, SOURCE_COLORIMETER)
 
 @dataclass(frozen=True)
 class InstrumentRouting:
-    """Two instruments, one artifact (§spec:sessions).
+    """Two instruments, one artifact.
 
     A hybrid session reads bright patches with the spectroradiometer and
     dark ones with a colorimeter disciplined by a correction derived
@@ -446,7 +446,7 @@ class InstrumentRouting:
 
 @dataclass(frozen=True)
 class MeasurementsArtifact:
-    """One characterize session's measurements (§spec:artifact-chain).
+    """One characterize session's measurements.
 
     The protocol sections default to None so skeleton-era artifacts
     (and tests) still render; a protocol session fills them all.
@@ -494,7 +494,7 @@ class MeasurementsArtifact:
     # encoding; the artifact records only what happened.
     wire_codes: tuple[tuple[int, int, int], ...] | None = None
     # The spectrum behind each driven patch, presentation order, each
-    # naming its own provenance (§spec:spectral-retention). A session
+    # naming its own provenance. A session
     # whose instrument returns no spectrum records every row absent
     # rather than leaving the block out: "no spectrum" is a fact about
     # the reading, and silence is not.
@@ -959,14 +959,14 @@ def verify(path: Path) -> str:
 def write(artifact: MeasurementsArtifact, path: Path) -> str:
     """Write the seam file at `path`; return its digest.
 
-    One file at the seam (§spec:measurement-seam): CSMF carrying the
+    One file at the seam: CSMF carrying the
     spectra and the tristimulus, with everything CSMF does not model in
     the provenance block its reserved ancillary field holds. CSMF
     replaced the YAML rendering rather than joining it, because a
     pipeline with two measurements files of record has none — the
     renderer stayed as the hashing projection.
 
-    The artifact is immutable once written (§spec:artifact-chain), so an
+    The artifact is immutable once written, so an
     existing file at `path` raises FileExistsError rather than being
     replaced, and a path that is not a `.csmf` raises ValueError.
     """

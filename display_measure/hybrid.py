@@ -1,4 +1,4 @@
-"""The disciplined colorimeter (§spec:sessions).
+"""The disciplined colorimeter.
 
 A spectroradiometer's integration time explodes at low light — the
 bench baseline is 18 s per patch, dominated by the dark rungs — while a
@@ -21,7 +21,7 @@ Three properties make the correction trustworthy:
   row (`display_measure.artifact.InstrumentRouting`).
 - **Wrapping, not replacing, the session.** `HybridInstrument`
   satisfies the session's `Instrument` protocol, so drive, settle, and
-  read are untouched (§spec:sessions). The session reads it by patch
+  read are untouched. The session reads it by patch
   name, so the hybrid keeps no copy of the session's iteration.
 
 Routing costs one colorimeter read per patch: the threshold is stated
@@ -48,7 +48,7 @@ roughly the spectroradiometer's floor this correction is being
 extrapolated far past the luminances it was derived at, and a
 four-color matrix corrects a multiplicative error while an additive
 offset would survive it. The opening black read stays on the reference
-pending instrument-floor measurements (§road:instrument-floors).
+pending instrument-floor measurements.
 """
 
 import logging
@@ -104,8 +104,7 @@ METHOD = "four-color-matrix"
 # The 2026-08-28 bench run derived a matrix with 128 on the leading term
 # and condition number 189, applied it three decades below the rungs it
 # came from, and inflated the dark end 13-20x. Nothing refused, and the
-# session spent twenty minutes measuring through it
-# (§road:session-consistency).
+# session spent twenty minutes measuring through it.
 MAX_IDENTITY_DEVIATION = 0.5
 MAX_CONDITION_NUMBER = 10.0
 
@@ -139,7 +138,7 @@ DEFAULT_LUMINANCE_THRESHOLD = 10.0
 # what its spectrum belongs to. A ramp rung shares one with the
 # full-drive patch of the same mixture, and that full-drive patch is the
 # bright-regime reading of "the same stimulus" a reconstruction scales
-# from (§spec:spectral-retention). The gray ramp's mixture is white's.
+# from. The gray ramp's mixture is white's.
 _FAMILY_ALIASES = {"gray": WHITE_PATCH}
 
 
@@ -436,7 +435,7 @@ class HybridInstrument:
             self._anchors[family] = (measured, level)
 
     def _reconstruct(self, patch: str, level: float) -> Spectrum:
-        """The spectrum for a colorimeter-routed row (§spec:spectral-retention).
+        """The spectrum for a colorimeter-routed row.
 
         A colorimeter has no spectrum, so the best a row can carry is the
         bright-regime measurement of the same stimulus scaled to the

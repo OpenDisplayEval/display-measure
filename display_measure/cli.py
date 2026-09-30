@@ -1,6 +1,6 @@
 """The `display-measure` command line surface.
 
-One command per session mode (§spec:sessions). `characterize` lands
+One command per session mode. `characterize` lands
 with the walking skeleton; `verify` and `snapshot` register here when
 their workstreams ship — no placeholder commands before then.
 `--instrument` chooses what measures: the doubles by default, so a
@@ -83,8 +83,7 @@ class InstrumentChoice(StrEnum):
     The doubles run anywhere; the hardware modes discover the
     Colorimetry Research instruments over serial. A hybrid session adds
     the colorimeter, disciplined in session against the
-    spectroradiometer, and reads the dark patches with it
-    (§spec:sessions).
+    spectroradiometer, and reads the dark patches with it.
     """
 
     DOUBLES = "doubles"
@@ -108,7 +107,7 @@ class WireChoice(StrEnum):
 
 @app.callback()
 def main() -> None:
-    """Measure displays through the show signal chain (§spec:sessions)."""
+    """Measure displays through the show signal chain."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(message)s",

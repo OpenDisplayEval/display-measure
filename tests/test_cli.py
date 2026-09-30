@@ -81,7 +81,7 @@ def test_characterize_writes_one_seam_file_and_nothing_beside_it(
     tmp_path: Path,
 ) -> None:
     """The command's output is CSMF and only CSMF: a pipeline with two
-    measurements files of record has none (§spec:measurement-seam). The
+    measurements files of record has none. The
     provenance block carries what CSMF does not model, and the reported
     hash is the digest of the projection it holds."""
     out = tmp_path / "measurements.csmf"

@@ -1,4 +1,4 @@
-"""A deterministic, physically plausible display double (§spec:sessions).
+"""A deterministic, physically plausible display double.
 
 Couples the two doubles seams: reads the frame most recently driven to
 the mock DeckLink and synthesizes the reading a real display would produce
@@ -13,7 +13,7 @@ downstream validation. The double is deliberately model-shaped: it
 embodies exactly the additivity + pure-power-law model the
 characterize protocol exists to falsify on real displays, so it can never
 grade that protocol — a double that disagrees with its device is worse
-than none, and grading it is the bench rig's job (§spec:sessions).
+than none, and grading it is the bench rig's job.
 
 `MismatchedColorimeter` reads the same display through a fixed filter
 mismatch, giving the disciplined-colorimeter session two disagreeing
@@ -68,14 +68,13 @@ BLACK_LEVEL = 0.005
 #
 # Deterministic all the same: the perturbation is derived from the read
 # index, not an RNG, so one run of the doubles is byte-identical to the
-# next (§spec:artifact-chain).
+# next.
 READ_NOISE = 1e-5
 
 
 def _contract_gamma() -> float:
     """The declared contract's decode gamma, narrowed from its
-    Optional field — derived, so display and contract cannot drift
-    (§spec:signal-contract)."""
+    Optional field — derived, so display and contract cannot drift."""
     gamma = DECLARED_CONTRACT.gamma_value
     if gamma is None:
         raise RuntimeError("the declared contract names no gamma decode")
@@ -116,10 +115,10 @@ _PRIMARY_XYZ = _primary_columns()
 
 
 # The double's spectrum: three Gaussian emitters at LED peak wavelengths
-# and widths, on the 5 nm grid a spectroradiometer reports
-# (§spec:spectral-retention). Narrow-band by construction, because that
-# is the shape whose filter mismatch the disciplined colorimeter exists
-# to correct and whose drive-invariance a reconstruction rests on.
+# and widths, on the 5 nm grid a spectroradiometer reports.
+# Narrow-band by construction, because that is the shape whose filter
+# mismatch the disciplined colorimeter exists to correct and whose
+# drive-invariance a reconstruction rests on.
 SPECTRAL_START = 380.0
 SPECTRAL_END = 780.0
 SPECTRAL_STEP = 5.0
@@ -281,7 +280,7 @@ class PlausibleDisplay:
 # The colorimeter's filter/observer mismatch, as the fixed 3x3 relating
 # its XYZ to a spectroradiometer's on this display's primaries. Percent-
 # scale off-diagonal terms stand in for the error a tristimulus
-# colorimeter makes on narrow-band LED emitters (§spec:sessions). A
+# colorimeter makes on narrow-band LED emitters. A
 # single matrix is exactly the error the four-color method corrects, so
 # this double grades the derivation's arithmetic and its plumbing, not
 # the method's fitness on real filters — that needs the bench rig.

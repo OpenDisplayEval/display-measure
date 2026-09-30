@@ -44,7 +44,7 @@ class TestConditioningFrames:
 
     def test_one_seed_drives_one_sequence(self) -> None:
         """Nothing records these frames, but they reach the display, and
-        two runs of one seed are one session (§spec:artifact-chain)."""
+        two runs of one seed are one session."""
         drives = []
         for _ in range(2):
             with MockBMDDeckLink(DECKLINK_INDEX) as device:
@@ -152,7 +152,7 @@ class TestReadRetries:
 
     def test_a_patch_no_attempt_can_read_fails_the_session(self) -> None:
         """The artifact is all-or-nothing: a hole in the ramps is not a
-        shorter session (§spec:artifact-chain)."""
+        shorter session."""
         instrument = Stumbling(failures=99)
 
         with pytest.raises(UnreadablePatch, match="'p'"):

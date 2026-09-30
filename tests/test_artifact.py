@@ -254,8 +254,8 @@ def test_patch_seconds_render_and_length_validation() -> None:
 def test_schema_keeps_the_name_it_was_promoted_under() -> None:
     """A wire identifier, pinned so a rename sweep cannot quietly move it.
 
-    The package renamed from color_wrangler to display_measure and this
-    string deliberately did not follow. Every promoted artifact carries
+    The package moved here from the umbrella project and this string
+    deliberately did not follow. Every promoted artifact carries
     it and downstream loaders dispatch on it, so a mechanical
     find-replace across the repository would corrupt the provenance of
     measurements already accepted. `VERIFY_SUITE.legacy_name` is pinned the same
@@ -392,7 +392,7 @@ def spectral_artifact() -> MeasurementsArtifact:
 
 
 def test_every_row_names_how_its_spectrum_was_obtained() -> None:
-    """Provenance is per row, not per file (§spec:spectral-retention)."""
+    """Provenance is per row, not per file."""
     rows = yaml.safe_load(render(spectral_artifact()))["spectra"]
     assert [row["provenance"] for row in rows] == [
         SPECTRUM_MEASURED,
@@ -451,7 +451,7 @@ class TestSeamFile:
 
     CSMF models the rows; everything else — the contract, the panel
     state, the protocol, the instrument, the wire — rides in the bytes
-    its reserved ancillary field holds (§spec:measurement-seam).
+    its reserved ancillary field holds.
     """
 
     def written(self, tmp_path: Path) -> tuple[Path, str]:

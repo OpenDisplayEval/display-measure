@@ -1,4 +1,4 @@
-"""Session-core tests against the device doubles (§spec:sessions)."""
+"""Session-core tests against the device doubles."""
 
 import logging
 from dataclasses import replace
@@ -44,10 +44,10 @@ def test_the_random_instrument_is_reachable_and_its_numbers_are_refused(
     """The physics-free virtual spectrometer validates plumbing only.
 
     It ignores the driven frame, so its ramps do not rise and the
-    self-consistency gate refuses to write an artifact from them
-    (§road:session-consistency). Reaching that gate is what proves the
-    seam: the session drove the protocol, read the instrument, assembled
-    an artifact, and only then judged the numbers.
+    self-consistency gate refuses to write an artifact from them.
+    Reaching that gate is what proves the seam: the session drove the
+    protocol, read the instrument, assembled an artifact, and only then
+    judged the numbers.
 
     There is deliberately no bypass. A flag that let a session skip this
     check would be used in anger the first time a rig misbehaved at
@@ -181,7 +181,7 @@ def test_disciplining_the_colorimeter_reproduces_the_spectro_only_session(
 ) -> None:
     """The threshold covers the whole ramp, so every held-out row comes
     from the corrected colorimeter — and lands on the values the
-    spectro-only session measured (§spec:sessions)."""
+    spectro-only session measured."""
     hybrid = projection(hybrid_artifact)
     spectro = projection(display_artifact)
     sources = hybrid["instrument_routing"]["sources"]
@@ -206,7 +206,7 @@ def test_every_row_records_how_its_spectrum_was_obtained(
     display_artifact: Path,
 ) -> None:
     """The spectroradiometer path measures one for every patch, and the
-    artifact says so row by row (§spec:spectral-retention)."""
+    artifact says so row by row."""
     doc = projection(display_artifact)
     spectra = doc["spectra"]
     assert len(spectra) == len(doc["protocol"]["presentation_order"])
@@ -272,7 +272,7 @@ def test_a_hybrid_session_reads_black_through_the_colorimeter(
     hybrid_artifact: Path,
 ) -> None:
     """Black is the session's most expensive read and the colorimeter is
-    the better instrument there (§road:instrument-floors), so the
+    the better instrument there, so the
     derivation rungs lead and black routes like any other dark patch."""
     doc = projection(hybrid_artifact)
     order = doc["protocol"]["presentation_order"]

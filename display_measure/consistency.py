@@ -1,4 +1,4 @@
-"""Gates over the session's own output (§road:session-consistency).
+"""Gates over the session's own output.
 
 The contract audit establishes what the processor claims and the output
 level establishes that the display does it. Neither catches a session that
@@ -35,7 +35,7 @@ __all__ = [
 # response, and two noise samples in either order say nothing about
 # monotonicity. The dark-room bench reads black near 0.0001 cd/m² and
 # the CR-120's own floor sits near 0.0014, so a millicandela is a
-# generous line under both (§road:instrument-floors).
+# generous line under both.
 DEFAULT_FLOOR = 0.001
 
 # How far the two instruments may disagree where they hand over, as a

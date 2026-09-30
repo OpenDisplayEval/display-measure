@@ -1,8 +1,8 @@
 """The contract audit gate: what the processor is, against what was declared.
 
 A session's numbers mean nothing without the processor state that produced
-them (§spec:signal-contract). The gate reads that state over the Tessera
-HTTP API — read-only, always (§spec:sessions) — and refuses the session on
+them. The gate reads that state over the Tessera
+HTTP API — read-only, always — and refuses the session on
 any divergence from the declared contract, before a single patch is driven.
 
 The refusal is the point. On 2026-08-28 the bench ran a full 72-patch
@@ -69,7 +69,7 @@ MIN_PLAUSIBLE_PEAK = 1.0
 HTTP_TIMEOUT_SECONDS = 5.0
 
 # Tessera's name for SDR on the input metadata; what a session signals
-# under the SDR contract it audits (§spec:signal-contract).
+# under the SDR contract it audits.
 SDR_HDR_FORMAT = "standard-dynamic-range"
 
 
@@ -79,7 +79,7 @@ class ContractViolation(RuntimeError):
 
 @dataclass(frozen=True)
 class WireFormat:
-    """The link the session declares it drives (§spec:signal-contract)."""
+    """The link the session declares it drives."""
 
     bit_depth: int
     sampling: str
@@ -113,7 +113,7 @@ def contract_from_manifest(path: Path) -> ProcessorStateSnapshot:
     """The declared contract, read from a show manifest's `signal_contract`.
 
     The manifest is the human-authored, reviewed source of truth for the
-    processor lockdown the generated config is valid for (§spec:provenance).
+    processor lockdown the generated config is valid for.
     Reading it here keeps the session and the config generator auditing the
     same declaration, rather than an operator retyping it into a flag where
     it can drift.
@@ -127,7 +127,7 @@ def contract_from_manifest(path: Path) -> ProcessorStateSnapshot:
     if not isinstance(contract, dict):
         raise ContractViolation(
             f"{path} declares no signal_contract; a session cannot audit a "
-            "contract the manifest does not state (§spec:signal-contract)"
+            "contract the manifest does not state"
         )
     processing = contract.get("processing")
     if not isinstance(processing, dict):
@@ -304,7 +304,7 @@ def audit_output_level(measured_peak: float, declared_intensity: str) -> None:
     That generality is the point. The 2026-08-28 bench run passed every
     contract check and still measured 1035 cd/m² against a display declared
     at 1800, because the panel was left in an operating mode no leaf of
-    the processor's API reports (§spec:signal-contract).
+    the processor's API reports.
 
     Two checks, both defaults rather than declarations:
 
@@ -411,7 +411,7 @@ def audit_wire_format(declared: WireFormat, live: InputMetadata) -> None:
 
     A declared 12-bit RGB SDR link that the processor reports as 10-bit, or
     as PQ, bakes its own quantization and transfer into the "measured"
-    response (§req:wire-format).
+    response.
     """
     problems: list[str] = []
     if declared.bit_depth != live.bit_depth:
@@ -465,7 +465,7 @@ def audit_input_gamut(
     the input at Rec.2020 and full-drive red asks for Rec.2020 red, which
     the processor gamut-maps into the panel — so the artifact's "red
     primary" describes a transform, and every consumer downstream
-    inherits it (§spec:signal-contract).
+    inherits it.
 
     Nothing else catches this. The reading is plausible, the ramps rise,
     the session passes every other gate, and the number is wrong.
@@ -497,7 +497,7 @@ def audit_input_gamut(
 
 
 class TesseraProcessor:
-    """Read-only Brompton Tessera HTTP client (§spec:sessions).
+    """Read-only Brompton Tessera HTTP client.
 
     Reads are `GET /api/<path>`. There is deliberately no write surface
     here: the tool observes and refuses, and never mutates show hardware.

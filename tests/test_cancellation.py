@@ -69,7 +69,7 @@ def test_a_cancelled_session_writes_no_artifact(
     fixed_clock: Clock, tmp_path: Path
 ) -> None:
     """The guarantee that matters. A measurements artifact is immutable
-    and complete (§spec:artifact-chain), so a partial one does not
+    and complete, so a partial one does not
     exist — a cancelled session's output is nothing at all."""
     out = tmp_path / "cancelled.csmf"
     run_cancelled(out, fixed_clock, after=3)

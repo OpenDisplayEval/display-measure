@@ -1,4 +1,4 @@
-"""The active port has to pass colour through (§spec:signal-contract).
+"""The active port has to pass colour through.
 
 A characterize session drives raw code values and records what returns
 as the display's own primaries. That holds only while the processor maps

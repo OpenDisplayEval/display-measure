@@ -143,7 +143,7 @@ def display_stream(
 def full_ramp_threshold() -> float:
     """Above anything the display double emits, so every patch outside the
     derivation set routes to the disciplined colorimeter — the
-    threshold-covers-the-ramp case §spec:sessions names."""
+    threshold-covers-the-ramp case."""
     return 1e6
 
 

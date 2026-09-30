@@ -4,7 +4,7 @@ A patch is a 12-bit RGB code triple (`display_measure.protocol`); the
 device packs whatever the declared encoding puts on the wire. For the
 identity encoding that is the triple itself. For a YCbCr encoding the
 triple is normalised and handed to pypixelpack, so this repository
-implements no conversion (`§spec:architecture` in color-wrangler).
+implements no conversion.
 Patches are flat fields, so one pixel is encoded and broadcast.
 
 Which device pixel format packs a layout is the drive's knowledge, not

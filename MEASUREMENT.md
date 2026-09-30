@@ -96,7 +96,8 @@ Consumers match on block ids. One compatibility affordance remains: the
 `verify` suite carries `legacy_name: color-wrangler/characterize/3` in
 the artifact's `protocol.name`, because ocio-display-gen matches that
 string today and every artifact already promoted carries it.
-`§road:ocio-reads-csmf` retires the field. No new suite claims one.
+The field retires once ocio-display-gen reads CSMF. No new suite
+claims one.
 
 The driven order is per-session — the seed and any instrument pins vary
 within one composition — and the artifact records it in full. Applying
@@ -150,7 +151,7 @@ doubles every two steps from 16 to 3072, by alternating factors 3/2 and
 
 Half-octave spacing in code space gives near-constant relative
 luminance steps through a power-law decode — dense where shadow
-response needs it (`§spec:signal-contract`), and it is what mapped this
+response needs it, and it is what mapped this
 bench panel's toe.
 
 The parity ramp is 25 evenly spaced codes from 16 to full drive, the
@@ -203,7 +204,7 @@ change to the presentation rule, and the rule is versioned even though
 the per-session order is not. Protocol 1 read black first because
 nothing needed to precede it; protocol 2 reads it after any pins the
 instrument declares, so the colorimeter can take the session's darkest
-and most expensive patch (`§road:instrument-floors`). Both flavors of
+and most expensive patch. Both flavors of
 protocol 2 carry one name, so hybrid and spectroradiometer-only
 artifacts stay comparable.
 
@@ -272,7 +273,7 @@ The closing black read arrives with the session gates
   can see.
 - Timing: the artifact records elapsed seconds per patch
   (`protocol.patch_seconds`, presentation order) — workflow telemetry
-  for driving session time down (`§road:session-throughput`). Durations
+  for driving session time down. Durations
   come from the session clock, so fixed-clock reproduction runs render
   zeros.
 - Panel state: the manifest attests `operating_mode` and
@@ -280,7 +281,7 @@ The closing black read arrives with the session gates
   (`--assume-attested` skips the prompt for scripted runs). Neither is
   readable from the processor and both move the measurement, so the
   operator is the only instrument that can report them. The artifact
-  records them; nothing compares them (`§spec:signal-contract`).
+  records them; nothing compares them.
 - Level: the white anchor's reading is checked against the declared
   intensity on sane-default bounds, and the session refuses outside them.
   The check names no cause, which is the point: it catches an operating
@@ -296,7 +297,7 @@ The closing black read arrives with the session gates
   at 100 and any brightness limit shall not bind — an operator who wants
   half the light sets brightness, not a gain the manifest cannot see. Processing is declared per feature: static
   linearization on is expected and measured, frame-adaptive processing
-  is refused (`§spec:signal-contract`). Without `--manifest` it audits
+  is refused. Without `--manifest` it audits
   against the built-in recommended contract, which is unlikely to match
   a given rig; without `--processor` a hardware session refuses
   outright. The doubles declare compliance and need neither.
@@ -315,8 +316,7 @@ The closing black read arrives with the session gates
   Black falls under it, and belongs there: blocked-aperture reads put
   the bench CR-300's own zero at 0.0149 cd/m² against a display black
   nearer 0.0014, so the reference instrument reads mostly itself down
-  there while the colorimeter is both truer and 6x faster
-  (`§road:instrument-floors`).
+  there while the colorimeter is both truer and 6x faster.
   Recorded per session in `instrument_routing`, alongside the derived
   matrix and the instrument behind every row.
 - Readings: one triggered measurement per patch, absolute XYZ in

@@ -1,25 +1,25 @@
-"""The characterize session core (§spec:sessions).
+"""The characterize session core.
 
 One shared flow, each stage a function that reports itself as an event:
 contract audit, ambient gate, patch drive, settle, instrument read,
 handoff — `characterize` is their composition. The session drives the
 versioned patch protocol (`display_measure.protocol`, MEASUREMENT.md) in
 shuffled presentation order and emits the immutable measurements
-artifact (§spec:artifact-chain). The gates that do not yet hold
+artifact. The gates that do not yet hold
 anything report themselves as stubs, so the seams exist before
 §road:session-gates fills them; verify-mode composes the same gate
 functions unchanged.
 
 The core narrates through `emit` and never through a logger
 (§spec:session-events). One seam, N consumers: the session log
-(`display_measure.session_log`) is one of them and the operator UI in
-color-wrangler is another, so nothing here knows what a frontend
+(`display_measure.session_log`) is one of them and the umbrella
+project's operator UI is another, so nothing here knows what a frontend
 looks like. `emit` defaults to the log renderer, which keeps a library
 caller and the CLI on the same path rather than privileging either.
 
 Cancellation is asked between patch steps and nowhere else. Stopping
 mid-patch would leave a driven frame with no reading, and the artifact
-is all-or-nothing (§spec:artifact-chain) — so a cancelled session
+is all-or-nothing — so a cancelled session
 stops playback, writes nothing, and raises `SessionCancelled`.
 
 Determinism: see the determinism-seam design in
@@ -175,7 +175,7 @@ FRAME_HEIGHT = 1080
 class PatchDrive(DeckLinkOutput, Protocol):
     """bmd-signal-gen's ``DeckLinkOutput`` plus the pixel-format setter.
 
-    Sessions declare the wire format explicitly (§spec:sessions), but
+    Sessions declare the wire format explicitly, but
     upstream's protocol omits the ``pixel_format`` property both device
     classes carry — an upstream gap worth closing. Until then this
     session-side protocol adds it; ``BMDDeckLink`` and
@@ -216,7 +216,7 @@ def _gate(
     produced it, and "the display measures 0.56x its declared intensity"
     calls for a different trip than "the processor has overdrive on".
     Naming the gate is what lets a consumer show the operator where to
-    go (§spec:web-ui).
+    go.
 
     `refusals` names the exceptions this gate refuses with, so a gate
     only ever claims a failure it actually raised.
@@ -260,7 +260,7 @@ def _session_outcome(emit: EventSink, clock: Clock) -> Iterator[None]:
 
 
 def ambient_gate(reading: InstrumentReading) -> float:
-    """Ambient gate (§spec:sessions): returns the recorded floor.
+    """Ambient gate: returns the recorded floor.
 
     Consumes the session's opening black reading. STUB until
     §road:session-gates: the budget refusal is not enforced, which the
@@ -296,7 +296,7 @@ def _setup_drive(device: PatchDrive, encoding: WireEncoding, emit: EventSink) ->
     The pixel format is the declared encoding's, so the wire the gate
     held the processor to is the wire the device packs. bmd-signal-gen
     defaults to PQ InfoFrames, which would fault an SDR-contract
-    display, so the session signals explicitly (§spec:sessions).
+    display, so the session signals explicitly.
     """
     packed = _pixel_format(encoding)
     device.pixel_format = packed
@@ -321,7 +321,7 @@ def _drive(
 def _settle(seconds: float, index: int, emit: EventSink) -> None:
     # Announced before the wait, not after: a settle and an instrument
     # read are where a session sits still, and saying so as it starts
-    # is what makes a run auditable while it happens (§spec:sessions).
+    # is what makes a run auditable while it happens.
     emit(PatchSettling(index, seconds))
     time.sleep(seconds)
 
@@ -352,8 +352,7 @@ def _condition(
 
     Colours come from the session seed, not an RNG: nothing records
     them, but they reach the device, and the determinism seam holds
-    that two runs of one seed drive one sequence of frames
-    (§spec:artifact-chain).
+    that two runs of one seed drive one sequence of frames.
     """
     if seconds <= 0:
         return
@@ -435,7 +434,7 @@ def _read(
 ) -> InstrumentReading:
     # A disciplined instrument routes by patch, so it is read by name;
     # the patch is already in hand here, which keeps the instrument
-    # from shadowing the session's own iteration (§spec:sessions).
+    # from shadowing the session's own iteration.
     #
     # A read is retried because the failures this instrument produces at
     # the bottom of a panel are transient: a timed-out integration or a
@@ -457,7 +456,7 @@ def _read(
             # what it can report has answered the question. Asking again
             # spends the integration to be told the same true thing —
             # ten times sixty-five seconds, on a CR-300 at slow speed,
-            # is eleven minutes to learn nothing (§spec:sessions).
+            # is eleven minutes to learn nothing.
             if _is_out_of_range(failure):
                 raise
             last = failure
@@ -645,7 +644,7 @@ def _characterize(
 ) -> None:
     """The session body `characterize` brackets with start and end events."""
     # The contract audit gates the session: nothing is driven until the
-    # processor is known to match what was declared (§spec:sessions).
+    # processor is known to match what was declared.
     with _gate(emit, Gate.CONTRACT_AUDIT):
         recorded_state = audit_contract(declared, reading)
     emit(
@@ -685,10 +684,10 @@ def _characterize(
     # closing black read (SPEC: the ambient budget opens and closes
     # the session). A disciplined instrument pins the patches its
     # correction is derived from behind black, and learns the driven
-    # order before the first read (§spec:sessions).
+    # order before the first read.
     # The derivation rungs lead a disciplined session: black is the
     # session's darkest and most expensive read, and the colorimeter is
-    # the better instrument for it (§road:instrument-floors), which it
+    # the better instrument for it, which it
     # can only be once its correction exists. Black follows them, still
     # ahead of the shuffle, and the ambient gate consumes it wherever it
     # lands. A single-instrument session pins nothing and opens on black
@@ -761,9 +760,9 @@ def _characterize(
         wire_encoding=encoding,
         # What the wire carried for each patch, as driven.
         wire_codes=tuple(encode_pixel(encoding, patch.rgb) for patch in presented),
-        # The spectrum behind each reading, and how it was obtained
-        # (§spec:spectral-retention). Discarding it at this boundary
-        # would be unrecoverable, and keeping it is free.
+        # The spectrum behind each reading, and how it was obtained.
+        # Discarding it at this boundary would be unrecoverable, and
+        # keeping it is free.
         spectra=tuple(spectrum(readings[patch.name]) for patch in presented),
         # The seam file's own rows: what was driven, and what was read.
         driven_codes=tuple(patch.rgb for patch in presented),
@@ -802,7 +801,7 @@ def _characterize(
     # not a ramp until it is measured. It still prevents the artifact,
     # which is the thing that outlives the session — a measurement that
     # contradicts itself never enters the chain to be promoted later by
-    # someone who was not in the room (§road:session-consistency).
+    # someone who was not in the room.
     _audit_self_consistency(artifact, emit)
     _handoff(artifact, out_path, emit)
 
@@ -864,7 +863,7 @@ def _measured(patches: tuple[Patch, ...], role: str) -> bool:
 
 
 def _audit_self_consistency(artifact: MeasurementsArtifact, emit: EventSink) -> None:
-    """Refuse an artifact whose own rows disagree (§road:session-consistency)."""
+    """Refuse an artifact whose own rows disagree."""
     from display_measure.consistency import (
         audit_ramp_monotonicity,
         audit_routing_boundary,
@@ -951,7 +950,7 @@ def _drive_presentation(
         if cancelled():
             # Between steps and nowhere else. A patch stopped mid-step
             # leaves a frame on the display with no reading behind it, and
-            # the artifact is all-or-nothing (§spec:artifact-chain), so
+            # the artifact is all-or-nothing, so
             # there is nothing to salvage by stopping sooner.
             raise SessionCancelled(
                 f"cancelled after {index - 1} of {len(presented)} patches; "
@@ -1187,9 +1186,9 @@ def hardware_session(
 
     Audits the processor before anything else: `processor_host` is read
     read-only over the Tessera API and the session refuses on any
-    divergence from `declared`, or an input link other than `encoding`
-    (§spec:sessions). The gate runs ahead of instrument discovery and
-    the DeckLink open, so a refusal costs a round trip rather than a rig.
+    divergence from `declared`, or an input link other than `encoding`.
+    The gate runs ahead of instrument discovery and the DeckLink open, so
+    a refusal costs a round trip rather than a rig.
 
     Discovers the Colorimetry Research spectroradiometer over serial —
     and, for `hybrid`, the colorimeter it disciplines against — then
