@@ -77,6 +77,13 @@ source = "vcs"
 [tool.hatch.build.targets.wheel]
 packages = ["display_measure"]
 
+[tool.uv]
+required-version = ">=0.12"
+# pydecklink arrives through bmd-signal-generator. Its 1.x builds against
+# DeckLink SDK 16 and needs Desktop Video 16.0 or later at runtime; on 15.x
+# the device refuses output. Lift this with the documented driver floor.
+constraint-dependencies = ["pydecklink<1"]
+
 [tool.uv.sources]
 bmd-signal-generator = { git = "https://github.com/OpenLEDEval/bmd-signal-gen", tag = "v0.2.1" }
 # The seam file's format is colour-specio's (§spec:scope), so the two gaps
