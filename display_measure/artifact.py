@@ -43,6 +43,7 @@ verifying.
 """
 
 import hashlib
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -54,8 +55,11 @@ from pathlib import Path
 # of every artifact already promoted. It changes only when the format
 # changes: 2 added `wire_encoding`, so a loader can tell two artifacts
 # of one display over different links apart; a schema-1 artifact
-# implied the bench's 12-bit RGB link.
-SCHEMA = "color-wrangler/measurements/2"
+# implied the bench's 12-bit RGB link. 3 lets a row, the black level and
+# the ambient floor be a bound below an instrument's floor rather than a
+# reading (§spec:below-floor), so a schema-2 loader refuses the file
+# instead of mistaking a bound for a value.
+SCHEMA = "color-wrangler/measurements/3"
 
 # The seam file is CSMF, and colour-specio's
 # loader opens no other suffix.
@@ -92,6 +96,33 @@ SPECTRUM_MEASURED = "measured"
 SPECTRUM_RECONSTRUCTED = "reconstructed"
 SPECTRUM_ABSENT = "absent"
 SPECTRUM_PROVENANCE = (SPECTRUM_MEASURED, SPECTRUM_RECONSTRUCTED, SPECTRUM_ABSENT)
+
+
+@dataclass(frozen=True)
+class Bound:
+    """A patch the instrument refused as too dark: at most `floor` cd/m².
+
+    Recorded in place of a reading, never beside one: the instrument said
+    it cannot report the light, so no tristimulus value stands for the
+    patch, and none from another instrument replaces it
+    (§spec:below-floor). `floor_source` says where the floor comes from —
+    a nominal figure the instrument states, or one qualified on the rig.
+    """
+
+    floor: float
+    floor_source: str
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.floor) or self.floor <= 0:
+            raise ValueError(
+                f"a bound's floor is a positive luminance; got {self.floor!r}"
+            )
+        _renderable(self.floor_source, "floor_source")
+
+
+# A row of the seam file: absolute XYZ in cd/m², or a bound below the
+# instrument's floor.
+Row = tuple[float, float, float] | Bound
 
 
 @dataclass(frozen=True)
@@ -456,9 +487,11 @@ class MeasurementsArtifact:
     green_xy: tuple[float, float]
     blue_xy: tuple[float, float]
     white_xy: tuple[float, float]
-    black_level: float
+    # A bound when the instrument refused black as too dark
+    # (§spec:below-floor); the ambient floor is then the same bound.
+    black_level: float | Bound
     peak_luminance: float
-    ambient_floor: float
+    ambient_floor: float | Bound
     instrument: InstrumentIdentity
     processor_state: ProcessorStateSnapshot
     session_start: datetime
@@ -504,8 +537,9 @@ class MeasurementsArtifact:
     # into protocol order, which is the shape a config generator reads;
     # these are the seam file's own rows, and recording them is what
     # lets the projection's digest cover the tristimulus the file
-    # carries.
-    readings: tuple[tuple[float, float, float], ...] | None = None
+    # carries. A patch the instrument refused as too dark is a `Bound`
+    # here, and carries no row in the seam file's measurements.
+    readings: tuple[Row, ...] | None = None
     # The protocol code values driven for each patch, presentation
     # order. Recorded rather than looked up from the protocol's name: a
     # reader should not have to own the patch table to know what was
@@ -541,6 +575,18 @@ class MeasurementsArtifact:
                 raise ValueError(
                     f"{field} parallels presentation_order: one entry per driven patch"
                 )
+        if self.readings is not None and self.spectra is not None:
+            for name, row, spectrum in zip(
+                self.presentation_order or (),
+                self.readings,
+                self.spectra,
+                strict=True,
+            ):
+                if isinstance(row, Bound) and spectrum.provenance != SPECTRUM_ABSENT:
+                    raise ValueError(
+                        f"{name} is a bound below the instrument's floor and "
+                        f"cannot carry a {spectrum.provenance} spectrum"
+                    )
 
 
 def _fmt(value: float) -> str:
@@ -685,6 +731,17 @@ def _protocol_lines(artifact: MeasurementsArtifact) -> list[str]:
     return [*lines, ""]
 
 
+def _fmt_bound(bound: Bound, instrument: str | None = None) -> str:
+    fields = [f"below: {_fmt(bound.floor)}", f'floor_source: "{bound.floor_source}"']
+    if instrument is not None:
+        fields.append(f'instrument: "{instrument}"')
+    return "{" + ", ".join(fields) + "}"
+
+
+def _fmt_luminance(value: float | Bound) -> str:
+    return _fmt_bound(value) if isinstance(value, Bound) else _fmt(value)
+
+
 def _row_lines(artifact: MeasurementsArtifact) -> list[str]:
     """The seam file's own rows: what was read, and how its spectrum came."""
     lines = []
@@ -692,9 +749,20 @@ def _row_lines(artifact: MeasurementsArtifact) -> list[str]:
         lines += [
             "# The absolute XYZ (cd/m²) read for each driven patch, in",
             "# presentation order — the seam file's own rows. The response",
-            "# sections below are the same readings in protocol order.",
+            "# sections below are the same readings in protocol order. A",
+            "# row the instrument refused as too dark is a bound instead:",
+            "# at most `below` cd/m², carrying no measurement in the seam",
+            "# file (§spec:below-floor).",
             "readings:",
-            *(f"  - {_fmt_xyz(row)}" for row in artifact.readings),
+            *(
+                "  - "
+                + (
+                    _fmt_bound(row, _row_instrument(artifact, index))
+                    if isinstance(row, Bound)
+                    else _fmt_xyz(row)
+                )
+                for index, row in enumerate(artifact.readings)
+            ),
             "",
         ]
     if artifact.spectra is not None:
@@ -772,14 +840,15 @@ def render(artifact: MeasurementsArtifact) -> str:
         f"    blue: {_fmt_xy(artifact.blue_xy)}",
         f"  white_point: {_fmt_xy(artifact.white_xy)}",
         "",
-        "# Absolute luminance, cd/m².",
+        "# Absolute luminance, cd/m². A black the instrument refused as",
+        "# too dark is a bound: at most `below` (§spec:below-floor).",
         "luminance:",
-        f"  black_level: {_fmt(artifact.black_level)}",
+        f"  black_level: {_fmt_luminance(artifact.black_level)}",
         f"  peak_luminance: {_fmt(artifact.peak_luminance)}",
         "",
         "# Ambient floor at measurement time, cd/m² (display showing black;",
-        "# reflected ambient plus panel leakage).",
-        f"ambient_floor: {_fmt(artifact.ambient_floor)}",
+        "# reflected ambient plus panel leakage), or the bound black was.",
+        f"ambient_floor: {_fmt_luminance(artifact.ambient_floor)}",
         "",
         "# Processor state read at measurement time (read-only snapshot),",
         "# except panel_state, which is carried and never checked.",
@@ -948,10 +1017,18 @@ def verify(path: Path) -> str:
 
     document = yaml.safe_load(projection) or {}
     driven = (document.get("protocol") or {}).get("presentation_order") or []
-    if driven and rows != len(driven):
+    # A bound carries no measurement row, so the rows the file must hold
+    # are the driven patches less the bounded ones.
+    bounded = sum(
+        1
+        for row in document.get("readings") or []
+        if isinstance(row, dict) and "below" in row
+    )
+    if driven and rows != len(driven) - bounded:
         raise ValueError(
             f"{path} does not verify: it carries {rows} measurement rows "
-            f"against {len(driven)} patches in the driven order"
+            f"against {len(driven)} patches in the driven order, "
+            f"{bounded} of them bounds"
         )
     return recomputed
 
@@ -1009,8 +1086,16 @@ def _seam_bytes(artifact: MeasurementsArtifact) -> bytes:
     )
 
     rows = _measurement_rows(artifact)
+    measured = _measured_indices(artifact)
     data = CSMF_Data(
-        test_colors=np.asarray(artifact.driven_codes or (), dtype=np.int64),
+        # Codes for the measured rows only: a bound carries no row, and
+        # the projection keeps the full driven order with its bounds.
+        test_colors=np.asarray(
+            [artifact.driven_codes[i] for i in measured]
+            if artifact.driven_codes is not None
+            else (),
+            dtype=np.int64,
+        ),
         # The rows are already in driven order, so each indexes itself.
         order=list(range(len(rows))),
         measurements=np.asarray(rows, dtype=object),
@@ -1062,8 +1147,21 @@ def _row_times(artifact: MeasurementsArtifact, count: int) -> list[datetime]:
     return times
 
 
+def _measured_indices(artifact: MeasurementsArtifact) -> list[int]:
+    """Presentation indices of the rows that are readings, not bounds."""
+    return [
+        index
+        for index, row in enumerate(artifact.readings or ())
+        if not isinstance(row, Bound)
+    ]
+
+
 def _measurement_rows(artifact: MeasurementsArtifact) -> list[object]:
-    """One CSMF row per driven patch, spectral where a spectrum exists.
+    """One CSMF row per measured patch, spectral where a spectrum exists.
+
+    A patch the instrument refused as too dark has no row: CSMF rows are
+    measurements, and a bound is not one. The projection in the
+    provenance block records it in the driven order.
 
     A row's tristimulus is always the one the session recorded, never
     the integral of the spectrum beside it: a reconstructed spectrum
@@ -1085,6 +1183,8 @@ def _measurement_rows(artifact: MeasurementsArtifact) -> list[object]:
     times = _row_times(artifact, len(readings))
     rows: list[object] = []
     for index, (xyz, spectrum) in enumerate(zip(readings, spectra, strict=True)):
+        if isinstance(xyz, Bound):
+            continue
         instrument = _row_instrument(artifact, index)
         row: SPDMeasurement | ColorimeterMeasurement
         if spectrum.provenance == SPECTRUM_ABSENT:

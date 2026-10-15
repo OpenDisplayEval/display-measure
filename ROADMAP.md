@@ -76,18 +76,11 @@ the instrument can read, recording each too-dark refusal as a bound.
 
 ### State the instrument floor §road:stated-floors
 
-Give each spectroradiometer driver a stated nominal floor in cd/m² for
-its model and measurement mode, the PR-655's and the CR-300's first, in
-colour-specio's device implementations. §spec:below-floor. Cross-repo:
-work lands in colour-specio; the PR-655 half depends on its driver
-landing.
-
-### Carry bounds in the measurements file §road:bounds-in-artifact
-
-Write bound rows and their instrument, floor and floor source into the
-provenance block under schema `color-wrangler/measurements/3`, and read
-them back, in `display_measure/artifact.py`. §spec:below-floor,
-§spec:measurements-artifact.
+Give the CR-300 driver a stated floor in cd/m² carried on its too-dark
+refusal, as the PR-655's already is, in colour-specio's Colorimetry
+Research implementation. §spec:below-floor. Cross-repo. Blocked — the
+Colorimetry Research manuals state no floor. Unblocked when the vendor
+states one or the rig supplies a qualified floor.
 
 ### Finish a session on a too-dark patch §road:dark-session
 
@@ -96,8 +89,7 @@ bounded black, narrate each bound on the event stream, and give the
 plausible-display double a floor so the doubles exercise it, in
 `display_measure/session.py`, `display_measure/events.py` and
 `display_measure/plausible_display.py`. §spec:below-floor,
-§spec:session-gates. Depends on §road:stated-floors and
-§road:bounds-in-artifact.
+§spec:session-gates.
 
 **Verify:** `display-measure characterize` against the doubles with a
 display darker than the double's floor exits 0 and writes a schema-3

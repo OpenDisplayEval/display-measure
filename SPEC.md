@@ -405,7 +405,7 @@ dimmer white, so no measured row stands in for it.
 
 ## Readings below an instrument's floor §spec:below-floor
 
-*Status: not started*
+*Status: in progress*
 
 A display can emit less light than the instrument aimed at it can see.
 An emissive panel turns its emitters off at code zero, so in a dark
