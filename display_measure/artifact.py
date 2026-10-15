@@ -208,7 +208,8 @@ PROCESSING_FEATURES = CONTENT_INDEPENDENT_FEATURES + CONTENT_DEPENDENT_FEATURES
 # trades peak luminance for low-end bit depth and stores its own PureTone
 # correction, so it moves the level and the transfer together.
 #
-# These live on the receiver card and surface on the panel OSD. Until a
+# These live on the receiver card and surface in the Tessera application's
+# device information for the panel, never in its HTTP API. Until a
 # session reads them off the wire (§road:operating-mode-read), the
 # operator is the only instrument that can. Two artifacts recorded under
 # different panel state describe different displays.
