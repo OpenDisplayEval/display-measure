@@ -160,7 +160,8 @@ DECKLINK_INDEX = 0
 
 # The spectroradiometers a hardware session can discover. The CR-300 is
 # the bench reference; a PR-655 measures with its own adaptive exposure,
-# so the CR-300's exposure ladder has nothing to climb on it. Its manual
+# so the ladder can only raise its averaging, at thresholds measured on
+# the CR-300 (§spec:measure-sessions). Its manual
 # states 3.4 cd/m² as the floor of the standard MS-75 lens at 1°. The
 # bench unit returned 0.53 cd/m² for black in a lit room — reflected
 # room, read at its 6 s exposure ceiling — and answered weak light for
