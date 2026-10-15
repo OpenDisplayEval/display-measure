@@ -248,9 +248,9 @@ def characterize(
         help=(
             "The spectroradiometer the hardware modes discover: cr300 "
             "(Colorimetry Research) or pr655 (Photo Research PR-655/670, "
-            "adaptive exposure, specified floor near 0.7 cd/m² — pair it "
-            "with --instrument hybrid where patches go darker). Ignored by "
-            "the doubles."
+            "adaptive exposure, stated floor 3.4 cd/m² with the standard "
+            "lens — pair it with --instrument hybrid where patches go "
+            "darker). Ignored by the doubles."
         ),
     ),
     threshold: float = typer.Option(
