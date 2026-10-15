@@ -160,9 +160,10 @@ DECKLINK_INDEX = 0
 
 # The spectroradiometers a hardware session can discover. The CR-300 is
 # the bench reference; a PR-655 measures with its own adaptive exposure,
-# so the CR-300's exposure ladder has nothing to climb on it, and its
-# weak-light floor (~0.7 cd/m²) puts dark patches out of range — the
-# disciplined hybrid is how a PR-655 session reads them.
+# so the CR-300's exposure ladder has nothing to climb on it. Its
+# specified floor is ~0.7 cd/m² (0.2 fL); the bench PR-655 still read
+# a 0.56 cd/m² black at its 6 s exposure ceiling, but darker patches
+# answer weak light, and the disciplined hybrid is what reads those.
 SPECTRO_CR300 = "cr300"
 SPECTRO_PR655 = "pr655"
 SPECTROS = (SPECTRO_CR300, SPECTRO_PR655)

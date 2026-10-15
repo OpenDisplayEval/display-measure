@@ -86,6 +86,16 @@ checkable without hardware. colour-specio's random virtual
 spectrometer remains available for plumbing-only tests: its
 physics-free readings exercise the seams, not the numbers.
 
+**The spectroradiometer is named.** A hardware session discovers the
+one the operator names: the Colorimetry Research CR-300, the bench
+reference, or a Photo Research PR-655. Each owns its exposure. The
+CR-300 climbs the session's ladder of speeds while a reading sits
+below what the current rung resolves; the PR-655 adapts its own
+integration and is read once. Either may answer that the light is
+outside what it can report. That answer is not retried: a
+single-instrument session stops on it, and the disciplined hybrid is
+how a session reads below it.
+
 **Disciplined hybrid.** Where a colorimeter alone cannot hold
 characterization grade, a 3×3 derived in session from paired readings
 of the full-drive R/G/B anchors (four-color matrix, Ohno & Hardis
