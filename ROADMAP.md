@@ -82,17 +82,8 @@ Research implementation. §spec:below-floor. Cross-repo. Blocked — the
 Colorimetry Research manuals state no floor. Unblocked when the vendor
 states one or the rig supplies a qualified floor.
 
-### Finish a session on a too-dark patch §road:dark-session
-
-Record a too-dark refusal as a bound and carry on, gate ambient on a
-bounded black, narrate each bound on the event stream, and give the
-plausible-display double a floor so the doubles exercise it, in
-`display_measure/session.py`, `display_measure/events.py` and
-`display_measure/plausible_display.py`. §spec:below-floor,
-§spec:session-gates.
-
-**Verify:** `display-measure characterize` against the doubles with a
-display darker than the double's floor exits 0 and writes a schema-3
+**Verify:** `display-measure characterize --suite config --double-floor
+0.5` against the doubles exits 0 and writes a schema-3
 file whose black is a bound naming the instrument and its floor, and
 the session log names the bound. The same run with an ambient budget
 below that floor refuses at black, naming the floor. On the bench, a

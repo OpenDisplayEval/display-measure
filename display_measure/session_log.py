@@ -19,6 +19,7 @@ import logging
 from display_measure.events import (
     GateEvaluated,
     HandoffCompleted,
+    PatchBounded,
     PatchCompleted,
     PatchSettling,
     PatchStarted,
@@ -72,6 +73,13 @@ def log_events(event: SessionEvent) -> None:
                 xyz[0],
                 xyz[1],
                 xyz[2],
+            )
+        case PatchBounded(_, patch, floor, floor_source, _):
+            log.info(
+                "instrument read: %s refused as too dark — below %.4g cd/m² (%s)",
+                patch,
+                floor,
+                floor_source,
             )
         case HandoffCompleted(path, sha256):
             log.info("handoff: wrote %s (sha256 %s)", path, sha256)

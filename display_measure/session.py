@@ -47,12 +47,15 @@ from bmd_sg.decklink import (
 )
 
 from display_measure.artifact import (
+    ABSENT_SPECTRUM,
     DECLARED_CONTRACT,
     AdditivityTriad,
+    Bound,
     MeasurementsArtifact,
     PerChannelResponse,
     ProcessorStateSnapshot,
     ResponsePoint,
+    Row,
     WireEncoding,
     check_seam_path,
     verify,
@@ -68,6 +71,7 @@ from display_measure.events import (
     GateVerdict,
     HandoffCompleted,
     Outcome,
+    PatchBounded,
     PatchCompleted,
     PatchSettling,
     PatchStarted,
@@ -99,6 +103,7 @@ from display_measure.instrument import (
 from display_measure.plausible_display import MismatchedColorimeter, PlausibleDisplay
 from display_measure.probes import ProbeResult
 from display_measure.processor import (
+    AmbientTooHigh,
     ContractViolation,
     TesseraProcessor,
     WireFormat,
@@ -482,6 +487,42 @@ def _is_out_of_range(failure: BaseException) -> bool:
     return any(base.__name__ == OUT_OF_RANGE_ERROR for base in type(failure).__mro__)
 
 
+def _bound_from(failure: BaseException) -> Bound | None:
+    """The bound a too-dark refusal stands for, or None.
+
+    Read structurally off the refusal, like everything else here: the
+    driver says whether the light was too dark and states the floor for
+    its setup, so the session needs no knowledge of which instrument
+    refused — in a paired session either may (§spec:below-floor). An
+    overload, or a refusal with no stated floor, is no bound: the
+    session stops on it as on any failed read.
+    """
+    if not _is_out_of_range(failure) or not getattr(failure, "too_dark", False):
+        return None
+    floor = getattr(failure, "floor", None)
+    if floor is None:
+        return None
+    source = getattr(failure, "floor_source", None) or "stated by the instrument"
+    return Bound(floor=float(floor), floor_source=str(source))
+
+
+def _reading_of(
+    readings: dict[str, InstrumentReading | Bound], name: str, purpose: str
+) -> InstrumentReading:
+    """`name`'s reading, refusing when the patch was bounded instead.
+
+    A primary or a full-drive mixture refused as too dark has no value
+    to derive `purpose` from, and the bound is not one.
+    """
+    reading = readings[name]
+    if isinstance(reading, Bound):
+        raise UnreadablePatch(
+            f"{name} was refused as too dark, below {reading.floor:.4g} cd/m² "
+            f"({reading.floor_source}); {purpose} needs a reading, not a bound"
+        )
+    return reading
+
+
 def _log_instrument(instrument: Instrument, note: str = "") -> None:
     """Narrate a discovered instrument. Pre-session; see `log` above."""
     who = identity(instrument)
@@ -514,7 +555,7 @@ def _handoff(artifact: MeasurementsArtifact, out_path: Path, emit: EventSink) ->
 
 def _ramp(
     protocol: tuple[Patch, ...],
-    readings: dict[str, InstrumentReading],
+    readings: dict[str, InstrumentReading | Bound],
     role: str,
     anchor: str,
 ) -> tuple[ResponsePoint, ...]:
@@ -522,7 +563,10 @@ def _ramp(
 
     The full-drive anchor reading closes the ramp as its top row: the
     anchors' absolute XYZ would otherwise leave the session only as
-    derived chromaticities, starving additivity and gain analysis.
+    derived chromaticities, starving additivity and gain analysis. A
+    step refused as too dark has no point here: the ramp holds readings,
+    and the seam file's rows already record that step's bound
+    (§spec:below-floor).
     """
     # Sorted by code, not taken in patch order. A ramp is assembled from
     # whichever blocks the suite composed — `response` carries the
@@ -532,13 +576,15 @@ def _ramp(
     # self-consistency gate reads these rows as a ramp.
     points = sorted(
         (
-            ResponsePoint(code=max(patch.rgb), xyz=xyz(readings[patch.name]))
+            ResponsePoint(code=max(patch.rgb), xyz=xyz(reading))
             for patch in protocol
             if patch.role == role
+            and not isinstance(reading := readings[patch.name], Bound)
         ),
         key=lambda point: point.code,
     )
-    return (*points, ResponsePoint(code=FULL_DRIVE, xyz=xyz(readings[anchor])))
+    top = _reading_of(readings, anchor, f"the {role} ramp's full-drive row")
+    return (*points, ResponsePoint(code=FULL_DRIVE, xyz=xyz(top)))
 
 
 def characterize(
@@ -731,12 +777,22 @@ def _characterize(
     # Probes run here: after every shuffled patch, because each of a
     # probe's own patches depends on the reading before it, and because
     # it searches against the black the anchors just measured.
+    if isinstance(ambient_floor, Bound) and suite.probes:
+        # A probe searches for first light above a measured black, and a
+        # bound is not one: anything it read would sit below a floor no
+        # reading of black established.
+        raise UnreadablePatch(
+            f"black was refused as too dark, below {ambient_floor.floor:.4g} "
+            f"cd/m² ({ambient_floor.floor_source}); the probes in "
+            f"{suite.name} search against a measured black. Read the dark "
+            "end with a more sensitive instrument (`--instrument hybrid`)."
+        )
     probe_results = _run_probes(
         suite,
         device,
         encoding,
         instrument,
-        ambient_floor,
+        None if isinstance(ambient_floor, Bound) else ambient_floor,
         read_attempts=read_attempts,
         settle_seconds=settle_seconds,
         emit=emit,
@@ -744,14 +800,20 @@ def _characterize(
 
     session_end = clock()
     patches = suite.patches
+    black = readings[BLACK_PATCH]
+    white = _reading_of(readings, "white", "the white point")
+    measured = [readings[patch.name] for patch in presented]
+    rows: tuple[Row, ...] = tuple(
+        m if isinstance(m, Bound) else xyz(m) for m in measured
+    )
     artifact = MeasurementsArtifact(
-        red_xy=chromaticity(readings["red"]),
-        green_xy=chromaticity(readings["green"]),
-        blue_xy=chromaticity(readings["blue"]),
-        white_xy=chromaticity(readings["white"]),
-        black_level=luminance(readings[BLACK_PATCH]),
+        red_xy=chromaticity(_reading_of(readings, "red", "the red primary")),
+        green_xy=chromaticity(_reading_of(readings, "green", "the green primary")),
+        blue_xy=chromaticity(_reading_of(readings, "blue", "the blue primary")),
+        white_xy=chromaticity(white),
+        black_level=black if isinstance(black, Bound) else luminance(black),
         # The white patch fills both white_point and peak_luminance.
-        peak_luminance=luminance(readings["white"]),
+        peak_luminance=luminance(white),
         ambient_floor=ambient_floor,
         instrument=identity(instrument),
         processor_state=recorded_state,
@@ -763,10 +825,13 @@ def _characterize(
         # The spectrum behind each reading, and how it was obtained.
         # Discarding it at this boundary would be unrecoverable, and
         # keeping it is free.
-        spectra=tuple(spectrum(readings[patch.name]) for patch in presented),
+        # A bound has no spectrum: the instrument refused the reading.
+        spectra=tuple(
+            ABSENT_SPECTRUM if isinstance(m, Bound) else spectrum(m) for m in measured
+        ),
         # The seam file's own rows: what was driven, and what was read.
         driven_codes=tuple(patch.rgb for patch in presented),
-        readings=tuple(xyz(readings[patch.name]) for patch in presented),
+        readings=rows,
         protocol_name=suite.legacy_name or suite.name,
         protocol_blocks=suite.block_ids,
         probe_results=probe_results,
@@ -788,9 +853,9 @@ def _characterize(
             else None
         ),
         additivity=AdditivityTriad(
-            yellow_xyz=xyz(readings["yellow"]),
-            cyan_xyz=xyz(readings["cyan"]),
-            magenta_xyz=xyz(readings["magenta"]),
+            yellow_xyz=xyz(_reading_of(readings, "yellow", "additivity")),
+            cyan_xyz=xyz(_reading_of(readings, "cyan", "additivity")),
+            magenta_xyz=xyz(_reading_of(readings, "magenta", "additivity")),
         )
         if _measured(patches, "additivity_yellow")
         else None,
@@ -935,16 +1000,18 @@ def _drive_presentation(
     max_ambient: float | None,
     emit: EventSink,
     cancelled: Cancelled,
-) -> tuple[dict[str, InstrumentReading], tuple[float, ...], float]:
+) -> tuple[dict[str, InstrumentReading | Bound], tuple[float, ...], float | Bound]:
     """Drive every patch; return the readings, their durations, and the floor.
 
     Each patch is one drive-settle-read step, timed end to end by the
     session clock so a consumer estimates the remaining time from
-    observed pace (§spec:session-events).
+    observed pace (§spec:session-events). A patch the instrument refuses
+    as too dark ends its step as a bound below the instrument's floor
+    (§spec:below-floor).
     """
-    readings: dict[str, InstrumentReading] = {}
+    readings: dict[str, InstrumentReading | Bound] = {}
     patch_seconds: list[float] = []
-    ambient_floor: float | None = None
+    ambient_floor: float | Bound | None = None
 
     for index, patch in enumerate(presented, start=1):
         if cancelled():
@@ -969,71 +1036,24 @@ def _drive_presentation(
         )
         _drive(device, encoding, patch, index, emit)
         _settle(settle_seconds, index, emit)
-        # A disciplined instrument derives its correction from the
-        # rungs it reads first, and refuses here when that correction
-        # is unfit to extrapolate (§spec:session-gates). The gate lives
-        # inside the instrument, so the read is where the session can
-        # name it.
-        with _gate(emit, Gate.DERIVATION_FITNESS, (DerivationRefused,)):
-            measurement = _read_at_depth(
-                instrument,
-                patch,
-                attempts=read_attempts,
-                ladder=DEFAULT_LADDER,
-                emit=emit,
-                index=index,
-            )
+        measurement = _read_or_bound(
+            instrument, patch, attempts=read_attempts, emit=emit, index=index
+        )
         seconds = (clock() - began).total_seconds()
         readings[patch.name] = measurement
         patch_seconds.append(seconds)
-        emit(PatchCompleted(index, patch.name, xyz(measurement), seconds))
+        _emit_step_done(emit, index, patch.name, measurement, seconds)
 
         if patch.name == BLACK_PATCH:
             # Gated the moment black is read, not at handoff: the budget
             # refusal §road:session-gates adds has to stop a session
             # early to be worth anything.
-            ambient_floor = ambient_gate(measurement)
-            # Enforced only where a composed block demands it. A block
-            # describing the display is contaminated by room light; a
-            # block describing the display in its environment is not,
-            # and an OCIO config renders into whatever ambient a venue
-            # has (§spec:session-gates).
-            if max_ambient is None:
-                emit(
-                    GateEvaluated(
-                        Gate.AMBIENT,
-                        GateVerdict.PASS,
-                        f"floor {ambient_floor:.4f} cd/m²; recorded as an "
-                        "operating condition, not gated — no block here "
-                        "describes the display apart from its room",
-                    )
-                )
-            else:
-                with _gate(emit, Gate.AMBIENT):
-                    audit_ambient(ambient_floor, max_ambient)
-                emit(
-                    GateEvaluated(
-                        Gate.AMBIENT,
-                        GateVerdict.PASS,
-                        f"floor {ambient_floor:.4f} cd/m² within the "
-                        f"{max_ambient:.4f} this composition allows",
-                    )
-                )
+            ambient_floor = _gate_black(measurement, max_ambient, emit)
         elif patch.name == WHITE_PATCH:
             # Gated where white is read, which protocol 3 pins second:
             # the contract audit established what the processor claims,
             # and this is where the display either does it or does not.
-            peak = luminance(measurement)
-            with _gate(emit, Gate.OUTPUT_LEVEL):
-                audit_output_level(peak, declared_intensity)
-            emit(
-                GateEvaluated(
-                    Gate.OUTPUT_LEVEL,
-                    GateVerdict.PASS,
-                    f"white measured {peak:.4g} cd/m² against "
-                    f"{declared_intensity} declared",
-                )
-            )
+            _gate_white(measurement, declared_intensity, emit)
 
     if ambient_floor is None:
         raise RuntimeError(
@@ -1041,6 +1061,138 @@ def _drive_presentation(
             "has nothing to consume"
         )
     return readings, tuple(patch_seconds), ambient_floor
+
+
+def _read_or_bound(
+    instrument: Instrument,
+    patch: Patch,
+    *,
+    attempts: int,
+    emit: EventSink,
+    index: int,
+) -> InstrumentReading | Bound:
+    """Read `patch`, or record the bound a too-dark refusal stands for.
+
+    Too dark is an answer the instrument stands behind, up to the floor
+    it states: recorded as that bound, not a reading and not a failure
+    (§spec:below-floor). Any other refusal propagates.
+    """
+    # A disciplined instrument derives its correction from the rungs it
+    # reads first, and refuses here when that correction is unfit to
+    # extrapolate (§spec:session-gates). The gate lives inside the
+    # instrument, so the read is where the session can name it.
+    try:
+        with _gate(emit, Gate.DERIVATION_FITNESS, (DerivationRefused,)):
+            return _read_at_depth(
+                instrument,
+                patch,
+                attempts=attempts,
+                ladder=DEFAULT_LADDER,
+                emit=emit,
+                index=index,
+            )
+    except Exception as failure:
+        bound = _bound_from(failure)
+        if bound is None:
+            raise
+        return bound
+
+
+def _emit_step_done(
+    emit: EventSink,
+    index: int,
+    name: str,
+    measurement: InstrumentReading | Bound,
+    seconds: float,
+) -> None:
+    """Close a patch's step on the stream, as a reading or as a bound."""
+    if isinstance(measurement, Bound):
+        emit(
+            PatchBounded(
+                index, name, measurement.floor, measurement.floor_source, seconds
+            )
+        )
+    else:
+        emit(PatchCompleted(index, name, xyz(measurement), seconds))
+
+
+def _gate_black(
+    measurement: InstrumentReading | Bound,
+    max_ambient: float | None,
+    emit: EventSink,
+) -> float | Bound:
+    """The ambient gate on the opening black; returns the recorded floor.
+
+    A bounded black is the floor's own bound, and passes a budget only
+    when the bound itself is within it: unknown is not within budget
+    (§spec:below-floor).
+    """
+    if isinstance(measurement, Bound):
+        recorded: float | Bound = measurement
+        level = measurement.floor
+        described = (
+            f"black below {level:.4g} cd/m², the instrument's floor "
+            f"({measurement.floor_source})"
+        )
+    else:
+        recorded = level = ambient_gate(measurement)
+        described = f"floor {level:.4f} cd/m²"
+    # Enforced only where a composed block demands it. A block describing
+    # the display is contaminated by room light; a block describing the
+    # display in its environment is not, and an OCIO config renders into
+    # whatever ambient a venue has (§spec:session-gates).
+    if max_ambient is None:
+        emit(
+            GateEvaluated(
+                Gate.AMBIENT,
+                GateVerdict.PASS,
+                f"{described}; recorded as an operating condition, not gated "
+                "— no block here describes the display apart from its room",
+            )
+        )
+        return recorded
+    with _gate(emit, Gate.AMBIENT):
+        if isinstance(measurement, Bound) and level > max_ambient:
+            # The room may be dark enough, but nothing here can show it.
+            raise AmbientTooHigh(
+                f"{described} is above the {max_ambient:.4g} cd/m² this "
+                "composition allows, so the session cannot confirm the room "
+                "is dark enough. Read the dark end with a more sensitive "
+                "instrument (`--instrument hybrid`)."
+            )
+        audit_ambient(level, max_ambient)
+    emit(
+        GateEvaluated(
+            Gate.AMBIENT,
+            GateVerdict.PASS,
+            f"{described} within the {max_ambient:.4f} this composition allows",
+        )
+    )
+    return recorded
+
+
+def _gate_white(
+    measurement: InstrumentReading | Bound,
+    declared_intensity: str,
+    emit: EventSink,
+) -> None:
+    """The output-level gate on white: the display does what it declares."""
+    with _gate(emit, Gate.OUTPUT_LEVEL):
+        if isinstance(measurement, Bound):
+            raise ContractViolation(
+                f"white was refused as too dark, below {measurement.floor:.4g} "
+                f"cd/m², against {declared_intensity} declared — the display "
+                "is not lit, or the instrument is not aimed at it"
+            )
+        peak = luminance(measurement)
+        audit_output_level(peak, declared_intensity)
+    emit(
+        GateEvaluated(
+            Gate.OUTPUT_LEVEL,
+            GateVerdict.PASS,
+            f"white measured {peak:.4g} cd/m² against {declared_intensity} declared",
+        )
+    )
 
 
 def normalized_reading(
@@ -1074,6 +1226,7 @@ def doubles_session(
     luminance_threshold: float = DEFAULT_LUMINANCE_THRESHOLD,
     encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
+    floor: float | None = None,
     emit: EventSink = log_events,
     cancelled: Cancelled = never_cancelled,
 ) -> MockBMDDeckLink:
@@ -1120,7 +1273,10 @@ def doubles_session(
             np.random.seed(seed)
             instrument = VirtualSpectrometer()
         else:
-            instrument = PlausibleDisplay(device, encoding=encoding)
+            # `floor` makes the display double refuse below it, as an
+            # instrument refuses below the floor it states, so the
+            # doubles exercise a session's bounds (§spec:below-floor).
+            instrument = PlausibleDisplay(device, encoding=encoding, floor=floor)
         characterize(
             device=device,
             instrument=instrument,
