@@ -443,6 +443,36 @@ def audit_wire_format(declared: WireFormat, live: InputMetadata) -> None:
 GAMUT_IDENTITY_TOLERANCE = 0.002
 
 
+# Device types Tessera lists under output/dynacal that emit no light.
+# Brompton's XD data distribution unit sits in the panel chain and gets
+# a dynacal entry like a panel does — on the SX40 bench, beside the
+# BP2 (NS), with `???` as every channel's mode. It is not a candidate
+# for the panel a session drives.
+DISTRIBUTION_TYPES = frozenset({"xd"})
+
+
+def driven_panel(dynacal: dict[str, Any]) -> dict[str, Any]:
+    """The one panel type's dynacal node, among what the processor lists.
+
+    Refuses when no panel type, or more than one, remains once
+    distribution hardware is set aside: a session cannot tell which
+    panel it is driving, and guessing would gate against the wrong
+    primaries.
+    """
+    panels = {
+        name: node
+        for name, node in dynacal.items()
+        if name.lower() not in DISTRIBUTION_TYPES
+    }
+    if len(panels) != 1:
+        raise ContractViolation(
+            f"processor reports {len(panels)} panel types under "
+            f"output/dynacal ({', '.join(sorted(panels)) or 'none'}); a "
+            "session cannot tell which one it is driving"
+        )
+    return next(iter(panels.values()))
+
+
 class GamutTransformInPath(ContractViolation):
     """The processor is mapping the input gamut into the panel's.
 
@@ -544,14 +574,7 @@ class TesseraProcessor:
 
     def panel_gamut(self) -> dict[str, tuple[float, float]]:
         """The panel's own primaries, as the processor holds them."""
-        panels = self._get("output/dynacal")["dynacal"]
-        if len(panels) != 1:
-            raise ContractViolation(
-                f"processor reports {len(panels)} panel types under "
-                "output/dynacal; a session cannot tell which one it is "
-                "driving"
-            )
-        node = next(iter(panels.values()))
+        node = driven_panel(self._get("output/dynacal")["dynacal"])
         return {
             channel: (float(node[channel]["x"]), float(node[channel]["y"]))
             for channel in ("red", "green", "blue")

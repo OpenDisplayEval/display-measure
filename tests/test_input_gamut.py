@@ -14,8 +14,10 @@ import pytest
 
 from display_measure.processor import (
     GAMUT_IDENTITY_TOLERANCE,
+    ContractViolation,
     GamutTransformInPath,
     audit_input_gamut,
+    driven_panel,
 )
 
 # The bench panel, as the processor reports it.
@@ -74,3 +76,42 @@ class TestTheGateRunsInTheSession:
         from display_measure import session
 
         assert "audit_input_gamut" in inspect.getsource(session._audit_processor)
+
+
+def _dynacal(red: tuple[float, float]) -> dict[str, object]:
+    return {"red": {"mode": "achievable", "x": red[0], "y": red[1]}}
+
+
+# What the SX40 bench lists under output/dynacal: the panel, and the XD
+# data distribution unit beside it with no primaries of its own.
+XD = {
+    "red": {"mode": "???", "x": 0.708, "y": 0.292},
+    "mode": "match-input",
+}
+
+
+class TestWhichPanelIsDriven:
+    def test_the_only_panel_type_is_the_driven_one(self) -> None:
+        panel = _dynacal((0.6950, 0.3046))
+
+        assert driven_panel({"bp2 (ns)": panel}) is panel
+
+    def test_distribution_hardware_is_not_a_panel(self) -> None:
+        """An XD in the chain gets a dynacal entry; it emits no light."""
+        panel = _dynacal((0.6950, 0.3046))
+
+        assert driven_panel({"bp2 (ns)": panel, "xd": XD}) is panel
+
+    def test_two_panel_types_are_refused(self) -> None:
+        with pytest.raises(ContractViolation, match=r"2 panel types.*bp2"):
+            driven_panel(
+                {
+                    "bp2 (ns)": _dynacal((0.6950, 0.3046)),
+                    "bp3": _dynacal((0.6900, 0.3100)),
+                    "xd": XD,
+                }
+            )
+
+    def test_only_distribution_hardware_is_refused(self) -> None:
+        with pytest.raises(ContractViolation, match="0 panel types"):
+            driven_panel({"xd": XD})
