@@ -154,8 +154,10 @@ __all__ = [
     "hardware_session",
 ]
 
-# The DeckLink a hardware session drives. One card on the bench rig;
-# multi-device selection waits for a session that needs it.
+# The DeckLink a hardware session drives unless told otherwise. A rig
+# with several cards, or a card split into sub-devices, numbers its
+# outputs in the driver's enumeration order, so the operator names the
+# one wired to the display (`--decklink`).
 DECKLINK_INDEX = 0
 
 # Pre-session narration only — instrument discovery and the processor
@@ -1179,6 +1181,7 @@ def hardware_session(
     processor_host: str | None = None,
     encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
+    decklink_index: int = DECKLINK_INDEX,
     emit: EventSink = log_events,
     cancelled: Cancelled = never_cancelled,
 ) -> None:
@@ -1192,8 +1195,9 @@ def hardware_session(
 
     Discovers the Colorimetry Research spectroradiometer over serial —
     and, for `hybrid`, the colorimeter it disciplines against — then
-    drives the protocol through the DeckLink. Discovery is by instrument
-    type, so both instruments may stay plugged in.
+    drives the protocol through the DeckLink output at `decklink_index`.
+    Discovery is by instrument type, so both instruments may stay
+    plugged in.
     """
     reading = _audit_processor(processor_host, declared, encoding)
 
@@ -1214,7 +1218,8 @@ def hardware_session(
             colorimeter,
             luminance_threshold=luminance_threshold,
         )
-    with BMDDeckLink(DECKLINK_INDEX) as device:
+    with BMDDeckLink(decklink_index) as device:
+        log.info("decklink: output device %d", decklink_index)
         characterize(
             device=device,
             instrument=instrument,
