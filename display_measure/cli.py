@@ -231,6 +231,16 @@ def characterize(
             "hybrid (CR-300 disciplining a CR-120)."
         ),
     ),
+    double_floor: float | None = typer.Option(
+        None,
+        "--double-floor",
+        min=0.0,
+        help=(
+            "Doubles only: the floor (cd/m²) below which the display double "
+            "refuses a reading as too dark, as an instrument refuses below "
+            "the floor it states — so a hardware-free run records bounds."
+        ),
+    ),
     threshold: float = typer.Option(
         DEFAULT_LUMINANCE_THRESHOLD,
         "--threshold",
@@ -411,6 +421,7 @@ def characterize(
                     hybrid=hybrid,
                     luminance_threshold=threshold,
                     encoding=encoding,
+                    floor=double_floor,
                     cancelled=cancelled,
                 )
             else:

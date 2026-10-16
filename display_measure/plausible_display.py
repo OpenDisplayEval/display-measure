@@ -179,6 +179,26 @@ class FrameSource(Protocol):
     def get_last_frame(self) -> npt.NDArray[np.uint16] | None: ...
 
 
+DOUBLE_FLOOR_SOURCE = "stated by the PlausibleDisplay double"
+
+
+class MeasurementOutOfRange(Exception):
+    """The double's too-dark refusal, shaped as a driver's.
+
+    Named as the drivers name theirs, because a session recognises the
+    refusal by name; it carries `too_dark` and the stated floor as a
+    driver's does, so the doubles exercise a session's bounds
+    (§spec:below-floor) without hardware.
+    """
+
+    too_dark = True
+
+    def __init__(self, floor: float) -> None:
+        self.floor: float | None = floor
+        self.floor_source: str | None = DOUBLE_FLOOR_SOURCE
+        super().__init__(f"weak light, below the double's {floor:g} cd/m² floor")
+
+
 class PlausibleDisplay:
     """Synthesizes the instrument reading for the frame being driven.
 
@@ -197,14 +217,19 @@ class PlausibleDisplay:
         encoding: WireEncoding = RGB12,
         ambient: float = 0.0,
         read_noise: float = READ_NOISE,
+        floor: float | None = None,
     ) -> None:
         """`encoding` is the link the display decodes — the one the
         session declares, since the wire-format gate holds the processor
         to it. `ambient` is reflected-light luminance (cd/m²) added to
         every reading — the knob §road:session-gates' ambient budget
-        refusal exercises without hardware. Default 0: a dark room."""
+        refusal exercises without hardware. Default 0: a dark room.
+        `floor` makes the double refuse, as too dark, any reading below
+        that luminance (cd/m²), as an instrument does below the floor it
+        states; default None never refuses."""
         self._device = device
         self._encoding = encoding
+        self._floor = floor
         self._ambient_xyz = _unit_xyz(WHITE_XY) * ambient
         self._read_noise = read_noise
         self._last_spot: bytes | None = None
@@ -272,6 +297,8 @@ class PlausibleDisplay:
         linear = decoded**DECODE_GAMMA
         xyz = self._ambient_xyz + _BLACK_XYZ + _PRIMARY_XYZ @ linear
         xyz = xyz + self._drive_offset(decoded)
+        if self._floor is not None and xyz[1] < self._floor:
+            raise MeasurementOutOfRange(self._floor)
         # A spectroradiometer's reading: the spectrum is measured, and
         # it integrates back to the XYZ beside it.
         return XYZReading(XYZ=xyz, spectrum=emitter_spectrum(xyz))

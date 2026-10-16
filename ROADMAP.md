@@ -68,3 +68,25 @@ same file.
 
 Return `colour-specio` to its released PyPI pin once the CSMF loader
 fix merges upstream, in `pyproject.toml`. §spec:scope.
+
+## Dark displays §road:dark-displays
+
+A single-spectroradiometer session finishes on a display darker than
+the instrument can read, recording each too-dark refusal as a bound.
+
+### State the instrument floor §road:stated-floors
+
+Give the CR-300 driver a stated floor in cd/m² carried on its too-dark
+refusal, as the PR-655's already is, in colour-specio's Colorimetry
+Research implementation. §spec:below-floor. Cross-repo. Blocked — the
+Colorimetry Research manuals state no floor. Unblocked when the vendor
+states one or the rig supplies a qualified floor.
+
+**Verify:** `display-measure characterize --suite config --double-floor
+0.5` against the doubles exits 0 and writes a schema-3
+file whose black is a bound naming the instrument and its floor, and
+the session log names the bound. The same run with an ambient budget
+below that floor refuses at black, naming the floor. On the bench, a
+dark-room `--instrument spectro --spectro pr655 --suite config`
+session finishes with black as a PR-655 bound and the other four
+anchors as readings.

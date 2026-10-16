@@ -44,6 +44,7 @@ __all__ = [
     "GateVerdict",
     "HandoffCompleted",
     "Outcome",
+    "PatchBounded",
     "PatchCompleted",
     "PatchSettling",
     "PatchStarted",
@@ -207,6 +208,24 @@ class PatchCompleted(SessionEvent):
     index: int
     patch: str
     xyz: tuple[float, float, float]
+    seconds: float
+
+
+@dataclass(frozen=True)
+class PatchBounded(SessionEvent):
+    """One patch the instrument refused as too dark; the step is done.
+
+    The counterpart of `PatchCompleted` for a patch recorded as a bound
+    below the instrument's floor rather than a reading
+    (§spec:below-floor): it carries the floor in cd/m² and where that
+    floor comes from, never a tristimulus value. A consumer counting
+    progress counts both, since either ends a patch's step.
+    """
+
+    index: int
+    patch: str
+    floor: float
+    floor_source: str
     seconds: float
 
 
