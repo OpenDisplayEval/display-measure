@@ -50,7 +50,7 @@ dependencies = [
     # (§spec:session-gates). The artifact renders its hashing projection
     # as YAML by hand, and does not parse it.
     "pyyaml>=6.0.1",
-    "typer>=0.16,<0.17",
+    "typer>=0.16",
 ]
 
 [project.urls]
@@ -78,7 +78,7 @@ source = "vcs"
 packages = ["display_measure"]
 
 [tool.uv.sources]
-bmd-signal-generator = { git = "https://github.com/OpenLEDEval/bmd-signal-gen", tag = "v0.2.1" }
+bmd-signal-generator = { git = "https://github.com/OpenDisplayEval/bmd-signal-gen", tag = "v0.2.3" }
 # The seam file's format is colour-specio's (§spec:scope), so the two gaps
 # that block it are fixed there rather than worked around here:
 # `load_csmf_file` read only the legacy spectral list and silently dropped a
