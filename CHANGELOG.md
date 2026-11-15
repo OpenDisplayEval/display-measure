@@ -1,3 +1,10 @@
+## [1.4.2](https://github.com/OpenDisplayEval/display-measure/compare/v1.4.1...v1.4.2) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deps:** allow typer releases past 0.16 and take bmd-signal-generator v0.2.3 ([#17](https://github.com/OpenDisplayEval/display-measure/issues/17)) ([0cf4e19](https://github.com/OpenDisplayEval/display-measure/commit/0cf4e19cf2bd3f95bb2a0d812c8e9655b15a1146))
+
 ## [1.4.1](https://github.com/OpenDisplayEval/display-measure/compare/v1.4.0...v1.4.1) (2026-09-01)
 
 
