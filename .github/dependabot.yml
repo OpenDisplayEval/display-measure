@@ -28,10 +28,10 @@ updates:
       prefix: build
       include: scope
 
-  # Actions are SHA-pinned with a trailing version comment; Dependabot bumps
-  # the SHA and rewrites the comment. The notation reusable workflow is pinned
-  # to a notation--v* tag, which Dependabot does not track, so bump that by
-  # hand.
+  # Dependabot bumps a SHA pin and rewrites its trailing version comment, and
+  # bumps a tag ref (actions/checkout@v5) to the next tag. The notation
+  # reusable workflow follows the floating notation--v0 tag, which Dependabot
+  # does not track.
   - package-ecosystem: github-actions
     directory: /
     schedule:
