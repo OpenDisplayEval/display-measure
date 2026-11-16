@@ -68,3 +68,42 @@ same file.
 
 Return `colour-specio` to its released PyPI pin once the CSMF loader
 fix merges upstream, in `pyproject.toml`. §spec:scope.
+
+## Dark displays §road:dark-displays
+
+A single-spectroradiometer session finishes on a display darker than
+the instrument can read, recording each too-dark refusal as a bound.
+
+### State the instrument floor §road:stated-floors
+
+Give each spectroradiometer driver a stated nominal floor in cd/m² for
+its model and measurement mode, the PR-655's and the CR-300's first, in
+colour-specio's device implementations. §spec:below-floor. Cross-repo:
+work lands in colour-specio; the PR-655 half depends on its driver
+landing.
+
+### Carry bounds in the measurements file §road:bounds-in-artifact
+
+Write bound rows and their instrument, floor and floor source into the
+provenance block under schema `color-wrangler/measurements/3`, and read
+them back, in `display_measure/artifact.py`. §spec:below-floor,
+§spec:measurements-artifact.
+
+### Finish a session on a too-dark patch §road:dark-session
+
+Record a too-dark refusal as a bound and carry on, gate ambient on a
+bounded black, narrate each bound on the event stream, and give the
+plausible-display double a floor so the doubles exercise it, in
+`display_measure/session.py`, `display_measure/events.py` and
+`display_measure/plausible_display.py`. §spec:below-floor,
+§spec:session-gates. Depends on §road:stated-floors and
+§road:bounds-in-artifact.
+
+**Verify:** `display-measure characterize` against the doubles with a
+display darker than the double's floor exits 0 and writes a schema-3
+file whose black is a bound naming the instrument and its floor, and
+the session log names the bound. The same run with an ambient budget
+below that floor refuses at black, naming the floor. On the bench, a
+dark-room `--instrument spectro --spectro pr655 --suite config`
+session finishes with black as a PR-655 bound and the other four
+anchors as readings.
