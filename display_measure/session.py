@@ -158,6 +158,18 @@ __all__ = [
 # multi-device selection waits for a session that needs it.
 DECKLINK_INDEX = 0
 
+# The spectroradiometers a hardware session can discover. The CR-300 is
+# the bench reference; a PR-655 measures with its own adaptive exposure,
+# so the ladder can only raise its averaging, at thresholds measured on
+# the CR-300 (§spec:measure-sessions). Its manual
+# states 3.4 cd/m² as the floor of the standard MS-75 lens at 1°. The
+# bench unit returned 0.53 cd/m² for black in a lit room — reflected
+# room, read at its 6 s exposure ceiling — and answered weak light for
+# the same patch in the dark; the disciplined hybrid reads below it.
+SPECTRO_CR300 = "cr300"
+SPECTRO_PR655 = "pr655"
+SPECTROS = (SPECTRO_CR300, SPECTRO_PR655)
+
 # Pre-session narration only — instrument discovery and the processor
 # pre-audit run before `characterize` opens the event stream, so there
 # is nothing to emit into yet. Everything inside a session goes through
@@ -1179,6 +1191,7 @@ def hardware_session(
     processor_host: str | None = None,
     encoding: WireEncoding = RGB12,
     declared: ProcessorStateSnapshot = DECLARED_CONTRACT,
+    spectro: str = SPECTRO_CR300,
     emit: EventSink = log_events,
     cancelled: Cancelled = never_cancelled,
 ) -> None:
@@ -1190,44 +1203,73 @@ def hardware_session(
     The gate runs ahead of instrument discovery and the DeckLink open, so
     a refusal costs a round trip rather than a rig.
 
-    Discovers the Colorimetry Research spectroradiometer over serial —
-    and, for `hybrid`, the colorimeter it disciplines against — then
-    drives the protocol through the DeckLink. Discovery is by instrument
-    type, so both instruments may stay plugged in.
+    Discovers the `spectro` spectroradiometer over serial — a CR-300 or
+    a Photo Research PR-655 — and, for `hybrid`, the CR colorimeter it
+    disciplines, then drives the protocol through the DeckLink. Leaves
+    the spectroradiometer released however the session ends.
     """
     reading = _audit_processor(processor_host, declared, encoding)
 
+    spectroradiometer = discover_spectroradiometer(spectro)
+    try:
+        instrument: Instrument = spectroradiometer
+        _log_instrument(spectroradiometer)
+        if hybrid:
+            from specio.colorimeters import CRColorimeter
+
+            colorimeter = CRColorimeter.discover()
+            _log_instrument(colorimeter, note=", disciplined in session")
+            instrument = HybridInstrument(
+                spectroradiometer,
+                colorimeter,
+                luminance_threshold=luminance_threshold,
+            )
+        with BMDDeckLink(DECKLINK_INDEX) as device:
+            characterize(
+                device=device,
+                instrument=instrument,
+                out_path=out_path,
+                clock=clock,
+                settle_seconds=settle_seconds,
+                suite=suite,
+                warmup_seconds=warmup_seconds,
+                conditioning_seconds=conditioning_seconds,
+                read_attempts=read_attempts,
+                encoding=encoding,
+                declared=declared,
+                reading=reading,
+                emit=emit,
+                cancelled=cancelled,
+            )
+    finally:
+        # A PR-6xx locks its touch screen while in remote mode; handing it
+        # back is part of ending the session. The CR drivers have no close.
+        close = getattr(spectroradiometer, "close", None)
+        if callable(close):
+            close()
+
+
+def discover_spectroradiometer(model: str) -> Instrument:
+    """Discover the spectroradiometer `model` names over serial.
+
+    Discovery is by vendor — the CR family answers an instrument-type
+    query, Photo Research by USB vendor id — so a CR colorimeter and
+    either spectroradiometer may stay plugged in together.
+    """
     # Deferred: specio drags colour + scipy (~0.8 s) that no doubles
     # path and no `--help` ever needs.
-    from specio.spectrometers import CRSpectrometer
+    # Typed on assignment: colour-specio ships no py.typed marker.
+    found: Instrument
+    if model == SPECTRO_CR300:
+        from specio.spectrometers import CRSpectrometer
 
-    spectroradiometer = CRSpectrometer.discover()
-    instrument: Instrument = spectroradiometer
-    _log_instrument(spectroradiometer)
-    if hybrid:
-        from specio.colorimeters import CRColorimeter
+        found = CRSpectrometer.discover()
+    elif model == SPECTRO_PR655:
+        from specio.spectrometers import PRSpectrometer
 
-        colorimeter = CRColorimeter.discover()
-        _log_instrument(colorimeter, note=", disciplined in session")
-        instrument = HybridInstrument(
-            spectroradiometer,
-            colorimeter,
-            luminance_threshold=luminance_threshold,
+        found = PRSpectrometer.discover()
+    else:
+        raise ValueError(
+            f"unknown spectroradiometer {model!r}; expected one of {SPECTROS}"
         )
-    with BMDDeckLink(DECKLINK_INDEX) as device:
-        characterize(
-            device=device,
-            instrument=instrument,
-            out_path=out_path,
-            clock=clock,
-            settle_seconds=settle_seconds,
-            suite=suite,
-            warmup_seconds=warmup_seconds,
-            conditioning_seconds=conditioning_seconds,
-            read_attempts=read_attempts,
-            encoding=encoding,
-            declared=declared,
-            reading=reading,
-            emit=emit,
-            cancelled=cancelled,
-        )
+    return found

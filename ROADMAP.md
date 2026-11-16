@@ -68,3 +68,10 @@ same file.
 
 Return `colour-specio` to its released PyPI pin once the CSMF loader
 fix merges upstream, in `pyproject.toml`. §spec:scope.
+
+### Pin colour-specio with the PR-655 driver §road:pin-specio-pr655
+
+Move the `colour-specio` pin to a revision carrying `PRSpectrometer`
+and its stated floor, in `pyproject.toml` and `uv.lock`.
+§spec:measure-sessions. Blocked — the driver is on an unpublished
+colour-specio branch. Unblocked when it publishes.
