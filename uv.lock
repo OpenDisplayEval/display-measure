@@ -2,6 +2,9 @@ version = 1
 revision = 5
 requires-python = "==3.13.*"
 
+[manifest]
+constraints = [{ name = "pydecklink", specifier = "<1" }]
+
 [[package]]
 name = "aenum"
 version = "3.1.17"
