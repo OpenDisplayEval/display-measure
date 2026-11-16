@@ -76,6 +76,11 @@ encodes through the shared packer and implements no conversion; the
 format-confirmation gate holds the processor to the declaration, and
 the artifact records it.
 
+**So is the output.** A rig may carry several DeckLink cards, or one
+card split into sub-devices, each wired to a different processor
+input. The session drives the device index the operator names,
+defaulting to the first, and narrates it before the session opens.
+
 **Instruments have doubles.** The default double is a deterministic
 plausible display — an additive per-channel model that synthesizes the
 reading for the frame being driven — so the hardware-free

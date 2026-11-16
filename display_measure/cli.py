@@ -52,6 +52,7 @@ DEFAULT_SETTLE_SECONDS = 0.5
 # Restated so `--help` costs no measurement stack; checked against the
 # session's own value in the tests.
 DEFAULT_READ_ATTEMPTS = 10
+DEFAULT_DECKLINK_INDEX = 0
 
 
 class SuiteChoice(StrEnum):
@@ -331,6 +332,17 @@ def characterize(
             "modes; ignored by the doubles."
         ),
     ),
+    decklink: int = typer.Option(
+        DEFAULT_DECKLINK_INDEX,
+        "--decklink",
+        min=0,
+        help=(
+            "DeckLink output device index, in the driver's enumeration "
+            "order (bmd-signal-gen lists them). A card split into "
+            "sub-devices numbers each one. Used by the hardware modes; "
+            "ignored by the doubles."
+        ),
+    ),
     manifest: Path | None = typer.Option(
         None,
         "--manifest",
@@ -427,6 +439,7 @@ def characterize(
                     processor_host=processor,
                     encoding=encoding,
                     declared=declared,
+                    decklink_index=decklink,
                     cancelled=cancelled,
                 )
     except FileExistsError as e:
