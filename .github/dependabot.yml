@@ -13,11 +13,6 @@ updates:
     # A release has a week to draw a follow-up fix before it is proposed.
     cooldown:
       default-days: 7
-    ignore:
-      # pydecklink 1.x needs Desktop Video 16 at runtime; the constraint in
-      # pyproject.toml moves with the documented driver floor.
-      - dependency-name: "pydecklink"
-        update-types: ["version-update:semver-major"]
     # ruff and mypy bring new findings that need code edits, so they land
     # apart from the library bumps.
     groups:
