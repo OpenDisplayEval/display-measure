@@ -262,9 +262,10 @@ def test_schema_keeps_the_name_it_was_promoted_under() -> None:
     way in tests/test_protocol.py; this closes the asymmetry.
 
     Schema 2 added the wire encoding block; a schema-1 artifact implied
-    the bench's 12-bit RGB link.
+    the bench's 12-bit RGB link. Schema 3 lets a row, the black level and
+    the ambient floor be a bound below an instrument's floor.
     """
-    assert SCHEMA == "color-wrangler/measurements/2"
+    assert SCHEMA == "color-wrangler/measurements/3"
 
 
 # --- the wire encoding is recorded -----------------------------------------

@@ -124,7 +124,9 @@ it expected, and why it stopped.
   tolerance. Ambient is recorded and gated, never compensated: a
   display cannot emit negative light to cancel reflection, and baking
   a venue's ambient into a characterization poisons the config
-  everywhere else.
+  everywhere else. A black darker than the instrument can read is a
+  bound, and the gate passes it only when the bound itself is within
+  budget (§spec:below-floor).
 - **Format confirmation** — read back the processor's input metadata
   per patch batch and confirm the wire format matches the format the
   session declared.
@@ -400,3 +402,83 @@ anchor's chromaticity by construction, and letting it overwrite the
 measured value would launder an estimate into a measurement. Black
 stays absent — it is panel leakage plus reflected ambient, not a
 dimmer white, so no measured row stands in for it.
+
+## Readings below an instrument's floor §spec:below-floor
+
+*Status: in progress*
+
+A display can emit less light than the instrument aimed at it can see.
+An emissive panel turns its emitters off at code zero, so in a dark
+room its black sits below any spectroradiometer's floor, and often its
+darkest lit steps do too. On the SX40 bench, 2026-10-15, a PR-655
+answered weak light for black at its 6 s exposure ceiling; with the
+room lights on the same patch read 0.53 cd/m², all of it reflected
+room. A session that treats the refusal as a failure cannot
+characterize a dark display with a single spectroradiometer at all,
+and one that keeps the lit-room number records the room as the panel.
+
+**A too-dark refusal is a bound, and the session records it.** When the
+instrument reading a patch answers that the light is below what it can
+report, the session shall record that patch as below that instrument's
+floor — an upper bound on its luminance — and carry on. The bound
+names the instrument, the floor in cd/m², and where the floor came
+from. It is never a tristimulus value, and no other instrument's
+reading replaces it: a reading from an instrument that sees less would
+be the floor of that instrument passed off as the display. Every patch
+the protocol drives can end as a bound, black most often.
+
+A refusal is still not retried. The instrument integrated and
+answered; asking again spends the integration to hear the same thing.
+
+**Too bright stays a failure.** An overload answer means an aperture,
+filter or mount problem, not a property of the display, so the session
+stops on it as it stops on any failed read.
+
+**The floor is the one the instrument states.** The refusal itself
+carries no number, so the bound's value comes from the instrument's
+driver, which states the floor for the model and measurement mode in
+use, and the bound records that it is a nominal figure. A floor
+qualified on the bench — a capped-aperture zero, a descending ladder —
+supersedes the nominal one where the rig supplies it, and the bound
+then says so. The floor is an upper bound only to the extent the
+stated floor is: a refusal turns on detector signal, not luminance, so
+a strongly saturated patch could refuse above it. The file states the
+floor rather than asserting the display's value, which keeps that
+judgement with the reader.
+
+Rejected: recording whatever the instrument returns beside its refusal.
+The PR-655 sends a spectrum with its weak-light status. It is the
+instrument saying it cannot vouch for the number, and a measurements
+file that kept it would launder a refused reading into a measured one.
+
+**The ambient gate does not pass on an unknown.** When black ends as a
+bound, the ambient floor is that bound. A bound at or below the
+composition's ambient budget passes: the room is at least that dark. A
+bound above the budget refuses and names the instrument floor, since
+the session cannot confirm the room is dark enough; the remedy is a
+more sensitive instrument for the dark end, not a lit room. A
+composition with no budget records the bound as an operating condition.
+
+**The file says which rows are bounds.** A bound row carries no
+measurement, and the measurements file states each one with its
+instrument and floor in the provenance block, so every consumer can
+tell a bound from a reading without inferring it from a missing value.
+That changes what a row of the file can mean, so the artifact schema
+moves to `color-wrangler/measurements/3`; a consumer that understands
+only schema 2 refuses the file rather than mistaking a bound for a
+missing row (§spec:measurements-artifact).
+
+**Downstream meaning is the consumer's.** The config generator and the
+report decide what a bounded black does to a black level, a contrast
+ratio or an ambient budget; this layer guarantees only that the bound
+reaches them as one. The upstream requirement is that a report states
+the floor beside the value and labels a ratio resting on it as
+instrument-limited.
+
+When this is complete: a single-spectroradiometer session on a dark
+display finishes and writes a schema-3 file in which black is a bound
+naming the instrument and its floor; the session log names every
+bounded patch as it happens; a session whose ambient budget sits below
+the instrument's floor refuses before the protocol runs past black; an
+overload still ends the session; and no row of the file holds a reading
+the instrument refused.
