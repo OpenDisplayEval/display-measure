@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/OpenDisplayEval/display-measure/compare/v1.4.2...v1.5.0) (2026-11-16)
+
+
+### Features
+
+* **deps:** run on pydecklink 1.x and Desktop Video 16 ([77a82b4](https://github.com/OpenDisplayEval/display-measure/commit/77a82b44537b18019e881a0b85a6a07386ed3cf7))
+
 ## [1.4.2](https://github.com/OpenDisplayEval/display-measure/compare/v1.4.1...v1.4.2) (2026-11-15)
 
 
