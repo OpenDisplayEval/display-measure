@@ -43,9 +43,8 @@ dependencies = [
     "numpy>=2.3.1",
     # The wire encoding between a patch and the device (§spec:measure-
     # sessions): the session declares one and pypixelpack encodes it, so
-    # no conversion is implemented here. Commit pin: a tag can be moved, so
-    # the hash pypixelpack tags as v0.1.0 is what travels with the wheel.
-    "pypixelpack @ git+https://github.com/Fuse-Technical-Group/pypixelpack@82e249e4531df297e0b81099e2b24eb08190a8d6",
+    # no conversion is implemented here.
+    "pypixelpack>=0.3,<1",
     # The contract audit reads the show manifest's signal_contract
     # (§spec:session-gates). The artifact renders its hashing projection
     # as YAML by hand, and does not parse it.
@@ -66,27 +65,14 @@ display-measure = "display_measure.cli:app"
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
-# The pypixelpack pin is a direct git reference so it travels with the
-# wheel's metadata rather than living only in uv's project-local sources.
-[tool.hatch.metadata]
-allow-direct-references = true
-
 [tool.hatch.version]
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["display_measure"]
 
-[tool.uv]
-# pydecklink arrives through bmd-signal-generator, whose pinned tag leaves it
-# uncapped. Its 1.x builds against DeckLink SDK 16 and needs Desktop Video
-# 16.0 or later at runtime; on 15.x the device refuses output. Only the
-# pypixelpack 0.1.0 pin holds it below 1.x without this, since 1.x needs
-# pypixelpack 0.3 or later. Lift this with the documented driver floor.
-constraint-dependencies = ["pydecklink<1"]
-
 [tool.uv.sources]
-bmd-signal-generator = { git = "https://github.com/OpenDisplayEval/bmd-signal-gen", tag = "v0.2.3" }
+bmd-signal-generator = { git = "https://github.com/OpenDisplayEval/bmd-signal-gen", tag = "v0.3.0" }
 # The seam file's format is colour-specio's (§spec:scope), so the two gaps
 # that block it are fixed there rather than worked around here:
 # `load_csmf_file` read only the legacy spectral list and silently dropped a
