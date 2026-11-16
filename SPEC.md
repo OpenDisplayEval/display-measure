@@ -132,10 +132,11 @@ it expected, and why it stopped.
   when the correction between them is unfit to extrapolate, rather
   than spending the protocol on it.
 - **Panel-state attestation** — a class of settings lives on the
-  receiver card, surfaces only on the panel OSD, and moves the
-  measurement, while no leaf of the processor's API reports any of it.
-  The session confirms each with the operator — the only instrument
-  that can read it — verbatim as the OSD reads it, and the artifact
+  receiver card, surfaces only in the Tessera application's device
+  information for the panel, and moves the measurement, while no leaf
+  of the processor's HTTP API reports any of it. The session confirms
+  each with the operator — the only instrument that can read it —
+  verbatim as Tessera shows it, and the artifact
   records it. Attested values are carried, never compared: naming them
   as readings would be the same silence in a new place.
 - **Provenance gate** (`verify`) — refuse to measure against a config

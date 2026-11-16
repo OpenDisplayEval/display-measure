@@ -160,7 +160,8 @@ def contract_from_manifest(path: Path) -> ProcessorStateSnapshot:
         raise ContractViolation(
             f"{path} does not declare signal_contract.panel_state.{missing}. "
             "Each moves the measurement and none is readable from the "
-            "processor; state it as it reads on the panel OSD."
+            "processor's API; state it as Tessera's device information for "
+            "the panel shows it."
         )
     eotf = contract.get("eotf") or {}
     return ProcessorStateSnapshot(

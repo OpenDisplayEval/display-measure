@@ -166,7 +166,8 @@ def _confirm_panel_state(panel_state: tuple[tuple[str, str], ...]) -> None:
     """
     typer.echo(
         "The manifest attests this panel state, which cannot be read "
-        "from the processor — confirm it at the panel OSD:",
+        "from the processor's API — confirm it against the panel's "
+        "device information in Tessera:",
         err=True,
     )
     for key, value in panel_state:
